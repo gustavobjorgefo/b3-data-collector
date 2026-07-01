@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "b3-data-collector"
+version = "0.1.0"
+description = "Automated collection and archival of B3 (Brazilian stock exchange) market data — BDI reports and tick-by-tick trades."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Gustavo de B. Jorge Filho" }
+]
+dependencies = [
+    "requests",
+    "pandas",
+    "pyarrow",
+    "boto3",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,20 @@
+# Ambiente virtual
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Configuração sensível
+.env
+
+# Dados e logs gerados localmente
+data/
+logs/
+
+# IDE
+.vscode/
+.idea/
