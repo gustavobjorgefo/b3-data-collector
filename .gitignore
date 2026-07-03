@@ -18,3 +18,7 @@ logs/
 # IDE
 .vscode/
 .idea/
+
+#
+.coverage
+htmlcov/
