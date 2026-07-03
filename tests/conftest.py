@@ -14,6 +14,13 @@ from datetime import date
 
 import pytest
 
+import shutil
+from pathlib import Path
+
+
+# --- Constants ---
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
 
 # --- Common test dates ---
 
@@ -27,6 +34,12 @@ def sample_trade_date() -> date:
 def sample_date_range() -> tuple[date, date]:
     """A short date range spanning one weekend, for business-day tests."""
     return date(2026, 6, 26), date(2026, 6, 29)  # Fri -> Mon
+
+
+@pytest.fixture
+def sample_zip_trade_date() -> date:
+    """The trading date matching the real ZIPs used to build the fixtures."""
+    return date(2026, 6, 30)
 
 
 # --- Sample CSV/report content ---
@@ -82,3 +95,44 @@ def tmp_data_dir(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     return data_dir
+
+
+# --- Isolated PATHS_B3 (extractor/partitioner tests) ---
+
+@pytest.fixture
+def patched_paths(tmp_path, monkeypatch):
+    """
+    Redirect every PATHS_B3 entry to isolated temp subdirectories.
+
+    _extractor.py and _partitioner.py both do `from ..paths import PATHS_B3`,
+    which means they hold a reference to the *same* dict object in memory —
+    patching entries via monkeypatch.setitem here affects both modules at
+    once, so a single fixture covers extraction and partitioning tests.
+    """
+    from b3_data_collector.tick_by_tick import _extractor
+
+    keys = [
+        "rv_downloads", "rv_raw_parquet", "rv_ticks",
+        "deriv_downloads", "deriv_raw_parquet", "deriv_ticks",
+    ]
+    paths = {}
+    for key in keys:
+        directory = tmp_path / key
+        directory.mkdir()
+        paths[key] = directory
+        monkeypatch.setitem(_extractor.PATHS_B3, key, directory)
+    return paths
+
+
+# --- Helper functions (not fixtures) ---
+
+def place_sample_zip(patched_paths, feed, fixture_name: str, trade_date: date) -> Path:
+    """
+    Copy a fixture ZIP into the patched downloads directory, renamed to
+    match what the extractor expects to find for the given feed and date.
+    """
+    cfg = feed.config
+    expected_filename = cfg.zip_name_template.format(date=trade_date)
+    destination = patched_paths[cfg.paths_key_downloads] / expected_filename
+    shutil.copy(FIXTURES_DIR / fixture_name, destination)
+    return destination
