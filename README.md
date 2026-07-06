@@ -1,5 +1,7 @@
 # b3-data-collector
 
+![CI](https://github.com/gustavobjorgefo/b3-data-collector/actions/workflows/ci.yml/badge.svg)
+
 **Automated collection and archival of B3 (Brazilian stock exchange) market data — BDI reports and tick-by-tick trades, downloaded and archived to Amazon S3.**
 
 ---
