@@ -34,3 +34,7 @@ minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-v --strict-markers"
+
+[tool.ruff.lint.per-file-ignores]
+"src/b3_data_collector/bdi/run_daily.py" = ["E402"]
+"src/b3_data_collector/tick_by_tick/run_daily.py" = ["E402"]

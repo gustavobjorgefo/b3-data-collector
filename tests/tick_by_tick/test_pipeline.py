@@ -16,7 +16,6 @@ from b3_data_collector.config import Settings
 from b3_data_collector.tick_by_tick import _downloader
 from b3_data_collector.tick_by_tick._feed import FeedType
 from b3_data_collector.tick_by_tick.pipeline import run_pipeline
-from tests.conftest import place_sample_zip
 
 from b3_data_collector.tick_by_tick.pipeline import (
     _business_days_in_range,

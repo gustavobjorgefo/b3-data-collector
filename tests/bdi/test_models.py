@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-from datetime import date
-
 from b3_data_collector.bdi._models import (
     BdiPipelineResult,
     ReportResult,
