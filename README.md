@@ -153,7 +153,10 @@ See [`examples/`](examples/) for two runnable scripts against real (trimmed) B3 
 
 ## Report Catalog
 
-The BDI catalog covers 60+ reports across fixed income, equities, options, and indices. A simplified reference (report name, section, API identifier, publication time) is available in [`docs/reports_catalog.md`](docs/reports_catalog.md).
+The BDI catalog covers 60+ reports across fixed income, equities, options, and indices.
+
+- [`docs/reports_catalog.md`](docs/reports_catalog.md) — simplified reference table (report name in Portuguese/English, section, API identifier).
+- [`docs/report_descriptions_en.md`](docs/report_descriptions_en.md) / [`docs/report_descriptions_pt.md`](docs/report_descriptions_pt.md) — a short description of what each report contains, in English and Portuguese.
 
 ---
 
