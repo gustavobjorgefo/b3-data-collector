@@ -3,7 +3,7 @@
 """
 B3 intraday tick-data ingestion pipeline.
 
-Orchestrates the three-stage data ingestion process for B3 tick data,
+Orchestrates the four-stage data ingestion process for B3 tick data,
 supporting both the equities (RV) and derivatives (DERIV) feeds via the
 ``FeedType`` parameter:
 
@@ -13,6 +13,8 @@ supporting both the equities (RV) and derivatives (DERIV) feeds via the
                           to canonical English schema, saves daily Parquet.
     Stage 3 — Partition : constructs the timestamp column, selects output
                           columns, validates and saves the tick-level Parquet.
+    Stage 4 — Ticks S3  : uploads the tick-level Parquet to S3, Hive-partitioned
+                          by year (folded into Stage 3's ``partition_to_ticks``).
 
 Date input contract
 -------------------
@@ -148,7 +150,8 @@ def _run_single_date(
     partition : bool
         Enable the partitioning stage.
     upload_to_s3 : bool
-        Enable S3 upload during the download stage.
+        Enable S3 upload during the download stage and the ticks upload
+        during the partitioning stage.
     overwrite : bool
         Re-run stages even when output already exists.
 
@@ -213,16 +216,18 @@ def _run_single_date(
             result.error   = f"Extract exception: {exc}"
             return result
 
-    # --- Stage 3: Partition ---
+    # --- Stage 3 & 4: Partition + ticks S3 upload ---
     if partition:
         try:
-            status, tick_count = partition_to_ticks(
-                trade_date = trade_date,
-                feed       = feed,
-                overwrite  = overwrite,
+            partition_status, ticks_s3_status, tick_count = partition_to_ticks(
+                trade_date   = trade_date,
+                feed         = feed,
+                overwrite    = overwrite,
+                upload_to_s3 = upload_to_s3,
             )
-            result.partition  = status
-            result.tick_count = tick_count
+            result.partition       = partition_status
+            result.ticks_s3_upload = ticks_s3_status
+            result.tick_count      = tick_count
         except FileNotFoundError as exc:
             logger.error("Partition FileNotFoundError for %s: %s", trade_date, exc)
             result.partition = StageStatus.FAILED
@@ -278,7 +283,8 @@ def run_pipeline(
     partition : bool, optional
         Enable the partitioning stage. Default is ``True``.
     upload_to_s3 : bool, optional
-        Upload each ZIP to S3 after download. Default is ``True``.
+        Upload each ZIP to S3 after download, and each ticks Parquet to
+        S3 after partitioning. Default is ``True``.
     overwrite : bool, optional
         Re-run all enabled stages even when output already exists.
         Default is ``False``.
