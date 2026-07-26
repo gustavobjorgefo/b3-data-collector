@@ -10,7 +10,8 @@ of configuration that differs between the equities (RV) and derivatives
 - Download URL template
 - Local ZIP filename template  (format receives a ``date`` object)
 - TXT filename prefix inside the ZIP  (same convention)
-- S3 key prefix
+- S3 key prefix for the raw ZIP archive
+- S3 key prefix for the processed ticks Parquet
 - Local directory keys in ``PATHS_B3``
 
 Both ZIPs contain a single TXT whose name follows the ``DD-MM-YYYY``
@@ -21,6 +22,11 @@ date format, confirmed from live files:
 
     DERIV ZIP : DD-MM-YYYY_NEGOCIOSAVISTA_DRV.zip
           TXT : DD-MM-YYYY_NEGOCIOSAVISTA_DRV.txt
+
+The processed ticks Parquet is partitioned Hive-style by year, mirroring
+the convention used by ``bdi/_uploader.py``:
+
+    b3/tick_by_tick/{rv|deriv}/ticks/year={YYYY}/{YYYY-MM-DD}.parquet
 
 Nothing in this module performs I/O.
 """
@@ -53,8 +59,13 @@ class FeedConfig:
         The extractor matches ``<prefix>*.txt`` to stay resilient against
         optional revision suffixes.
     s3_prefix : str
-        S3 key prefix under the bucket root
+        S3 key prefix for the raw ZIP archive, under the bucket root
         (e.g. ``"b3/bdi/tick_by_tick_rv/"``).
+    s3_prefix_ticks : str
+        S3 key prefix for the processed ticks Parquet, under the bucket
+        root (e.g. ``"b3/tick_by_tick/rv/ticks/"``). The final key also
+        receives a ``year={YYYY}/`` segment and the date-named file,
+        appended by the partitioner at upload time.
     paths_key_downloads : str
         Key into ``PATHS_B3`` for the local downloads directory.
     paths_key_raw : str
@@ -70,6 +81,7 @@ class FeedConfig:
     zip_name_template   : str
     txt_prefix_template : str
     s3_prefix           : str
+    s3_prefix_ticks     : str
     paths_key_downloads : str
     paths_key_raw       : str
     paths_key_ticks     : str
@@ -83,6 +95,7 @@ _CONFIGS: Final[dict[str, FeedConfig]] = {
         zip_name_template   = "{date:%Y%m%d}_NEGOCIOSAVISTA.zip",
         txt_prefix_template = "{date:%d-%m-%Y}_NEGOCIOSAVISTA_RV",
         s3_prefix           = "b3/bdi/tick_by_tick_rv/",
+        s3_prefix_ticks     = "b3/tick_by_tick/rv/ticks/",
         paths_key_downloads = "rv_downloads",
         paths_key_raw       = "rv_raw_parquet",
         paths_key_ticks     = "rv_ticks",
@@ -94,6 +107,7 @@ _CONFIGS: Final[dict[str, FeedConfig]] = {
         zip_name_template   = "{date:%d-%m-%Y}_NEGOCIOSAVISTA_DRV.zip",
         txt_prefix_template = "{date:%d-%m-%Y}_NEGOCIOSAVISTA_DRV",
         s3_prefix           = "b3/bdi/tick_by_tick_deriv/",
+        s3_prefix_ticks     = "b3/tick_by_tick/deriv/ticks/",
         paths_key_downloads = "deriv_downloads",
         paths_key_raw       = "deriv_raw_parquet",
         paths_key_ticks     = "deriv_ticks",
