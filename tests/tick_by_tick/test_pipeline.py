@@ -17,10 +17,10 @@ from b3_data_collector.tick_by_tick import _downloader, _partitioner
 from b3_data_collector.tick_by_tick._feed import FeedType
 from b3_data_collector.tick_by_tick.pipeline import run_pipeline
 
-from b3_data_collector.tick_by_tick.pipeline import (
-    _business_days_in_range,
-    _parse_date,
-    _resolve_dates,
+from b3_data_collector.common import (
+    business_days_in_range as _business_days_in_range,
+    parse_date as _parse_date,
+    resolve_dates as _resolve_dates,
 )
 
 
