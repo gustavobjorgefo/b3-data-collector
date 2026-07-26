@@ -23,16 +23,21 @@ python examples/read_single_bdi_report.py
 
 BDI reports don't share a common layout — headers, footers, and column
 meaning vary per report. Rather than one generic parser for all 63 reports
-in the catalog, this project uses a small registry pattern: one dedicated
-parser function per report, looked up by its `api_name`. Only
-`BTBLoanBalance` is implemented here, since it's the only one this project
-currently consumes downstream.
+in the catalog, the library uses a small registry pattern in
+`b3_data_collector.bdi._parsers`: one dedicated parser function per report,
+looked up by its `api_name`. Only `BTBLoanBalance` is implemented so far,
+since it's the only one this project currently consumes downstream. This
+script is just a thin demonstration — it calls that shared parsing engine
+against a local file; the `reader` subpackage (see the main
+[README](../README.md)) calls the exact same parsers against bytes
+downloaded from S3.
 
 **Want to add support for another report?** Open
-`read_single_bdi_report.py`, write a `read_<report_name>(path) -> pd.DataFrame`
-function following the same shape as `read_btb_loan_balance`, and register
-it in the `_READERS` dict. That's a good first contribution — see the full
-report catalog in `src/b3_data_collector/bdi/_catalog.py`.
+`src/b3_data_collector/bdi/_parsers.py`, write a
+`read_<report_name>(source) -> pd.DataFrame` function following the same
+shape as `read_btb_loan_balance`, and register it in the `_READERS` dict.
+That's a good first contribution — see the full report catalog in
+`src/b3_data_collector/bdi/_catalog.py`.
 
 **Expected output:** a DataFrame with 195 rows, 14 columns — asset code,
 ISIN, market, contract counts, and donor/borrower rates as floats (e.g.
