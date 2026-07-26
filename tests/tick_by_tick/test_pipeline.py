@@ -13,7 +13,7 @@ from moto import mock_aws
 
 from b3_data_collector.common import StageStatus
 from b3_data_collector.config import Settings
-from b3_data_collector.tick_by_tick import _downloader
+from b3_data_collector.tick_by_tick import _downloader, _partitioner
 from b3_data_collector.tick_by_tick._feed import FeedType
 from b3_data_collector.tick_by_tick.pipeline import run_pipeline
 
@@ -74,6 +74,12 @@ class TestRunPipelineIntegration:
     chained for real, with network and S3 mocked and filesystem isolated
     to tmp_path. Uses the real sample ZIP fixture as the download response,
     so the full chain runs on genuine B3-format data.
+
+    ``settings`` is patched on both ``_downloader`` (ZIP archive upload)
+    and ``_partitioner`` (processed ticks Parquet upload) — each module
+    holds its own module-level reference to the settings object, so both
+    must point at the same fake bucket for the full chain to land in the
+    same mocked S3.
     """
 
     @pytest.fixture
@@ -88,6 +94,7 @@ class TestRunPipelineIntegration:
     @pytest.fixture
     def s3_bucket(self, fake_settings, monkeypatch):
         monkeypatch.setattr(_downloader, "settings", fake_settings)
+        monkeypatch.setattr(_partitioner, "settings", fake_settings)
         with mock_aws():
             client = boto3.client("s3", region_name=fake_settings.AWS_S3_REGION)
             client.create_bucket(Bucket=fake_settings.AWS_S3_BUCKET_B3)
@@ -127,15 +134,24 @@ class TestRunPipelineIntegration:
         assert date_result.extract is StageStatus.SUCCESS
         assert date_result.partition is StageStatus.SUCCESS
         assert date_result.s3_upload is StageStatus.SUCCESS
+        assert date_result.ticks_s3_upload is StageStatus.SUCCESS
         assert date_result.tick_count == 20
 
-        # Confirm the final tick-level Parquet actually exists and is readable
+        # Confirm the final tick-level Parquet actually exists locally...
         import pandas as pd
 
         ticks_file = patched_paths["rv_ticks"] / f"{sample_zip_trade_date}.parquet"
         df = pd.read_parquet(ticks_file)
         assert len(df) == 20
         assert "timestamp" in df.columns
+
+        # ...and landed in S3 under the expected Hive-partitioned key.
+        import io
+
+        key = _partitioner._build_s3_key_ticks(cfg.s3_prefix_ticks, sample_zip_trade_date)
+        obj = s3_bucket.get_object(Bucket="test-bucket", Key=key)
+        df_s3 = pd.read_parquet(io.BytesIO(obj["Body"].read()))
+        assert len(df_s3) == 20
 
     def test_pipeline_stops_gracefully_on_download_404(
         self, requests_mock, patched_paths, s3_bucket, sample_zip_trade_date
@@ -156,3 +172,4 @@ class TestRunPipelineIntegration:
         # extract/partition never ran — stages default to SKIPPED
         assert date_result.extract is StageStatus.SKIPPED
         assert date_result.partition is StageStatus.SKIPPED
+        assert date_result.ticks_s3_upload is StageStatus.SKIPPED
