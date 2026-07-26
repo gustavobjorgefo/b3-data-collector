@@ -24,3 +24,12 @@ class TestFeedType:
     def test_url_template_contains_date_placeholder(self):
         for feed in FeedType:
             assert "{date}" in feed.config.url_template
+
+    def test_each_feed_config_has_distinct_s3_prefixes(self):
+        for feed in FeedType:
+            cfg = feed.config
+            assert cfg.s3_prefix
+            assert cfg.s3_prefix_ticks
+            # ZIP archive and processed ticks must never share a prefix —
+            # otherwise uploads from the two stages could collide in S3.
+            assert cfg.s3_prefix != cfg.s3_prefix_ticks

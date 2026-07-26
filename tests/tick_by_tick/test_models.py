@@ -25,6 +25,19 @@ class TestDateResult:
         result = DateResult(trade_date=sample_trade_date)
         assert "—" in result.summary_line
 
+    def test_summary_line_includes_both_s3_upload_statuses(self, sample_trade_date):
+        result = DateResult(
+            trade_date=sample_trade_date,
+            s3_upload=StageStatus.SUCCESS,
+            ticks_s3_upload=StageStatus.FAILED,
+        )
+        # Both uploads are tracked independently — the ZIP archive upload
+        # (s3_zip) and the processed ticks Parquet upload (s3_ticks) must
+        # be distinguishable in the summary, since one can fail while the
+        # other succeeds.
+        assert "s3_zip=SUCCESS" in result.summary_line
+        assert "s3_ticks=FAILED" in result.summary_line
+
 
 class TestPipelineResult:
     def test_counters_aggregate_correctly(self, sample_trade_date):
