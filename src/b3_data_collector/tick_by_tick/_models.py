@@ -2,7 +2,10 @@
 
 """
 Pipeline result models for the B3 tick-by-tick ingestion pipeline.
-...
+
+Tracks, per trading date, the outcome of each of the four pipeline
+stages (download, extract, partition, and the two S3 uploads — raw ZIP
+archive and processed ticks Parquet) plus the resulting tick count.
 """
 
 from __future__ import annotations
@@ -20,13 +23,38 @@ __all__ = ["StageStatus", "DateResult", "PipelineResult"]
 
 @dataclass
 class DateResult:
-    trade_date  : date
-    download    : StageStatus = StageStatus.SKIPPED
-    extract     : StageStatus = StageStatus.SKIPPED
-    partition   : StageStatus = StageStatus.SKIPPED
-    s3_upload   : StageStatus = StageStatus.SKIPPED
-    tick_count  : int | None  = None
-    error       : str | None  = None
+    """
+    Outcome of the full pipeline for a single trading date.
+
+    Parameters
+    ----------
+    trade_date : date
+        The trading date that was processed.
+    download : StageStatus
+        Outcome of the ZIP download stage.
+    extract : StageStatus
+        Outcome of the raw Parquet extraction stage.
+    partition : StageStatus
+        Outcome of the ticks Parquet partitioning stage.
+    s3_upload : StageStatus
+        Outcome of uploading the raw ZIP archive to S3.
+    ticks_s3_upload : StageStatus
+        Outcome of uploading the processed ticks Parquet to S3.
+    tick_count : int | None
+        Number of ticks written, or ``None`` if partitioning did not
+        complete successfully.
+    error : str | None
+        Human-readable error message, or ``None`` on success.
+    """
+
+    trade_date      : date
+    download        : StageStatus = StageStatus.SKIPPED
+    extract         : StageStatus = StageStatus.SKIPPED
+    partition        : StageStatus = StageStatus.SKIPPED
+    s3_upload        : StageStatus = StageStatus.SKIPPED
+    ticks_s3_upload  : StageStatus = StageStatus.SKIPPED
+    tick_count       : int | None  = None
+    error            : str | None  = None
 
     @property
     def succeeded(self) -> bool:
@@ -41,7 +69,8 @@ class DateResult:
             f"  download={self.download.name}"
             f"  extract={self.extract.name}"
             f"  partition={self.partition.name}"
-            f"  s3={self.s3_upload.name}"
+            f"  s3_zip={self.s3_upload.name}"
+            f"  s3_ticks={self.ticks_s3_upload.name}"
             f"  ticks={ticks}"
         )
 
@@ -50,6 +79,20 @@ class DateResult:
 
 @dataclass
 class PipelineResult:
+    """
+    Aggregate outcome of a tick-by-tick pipeline run across one or more
+    trading dates.
+
+    Parameters
+    ----------
+    results : list[DateResult]
+        Per-date outcomes, in processing order.
+    started_at : float
+        Monotonic timestamp when the pipeline started.
+    finished_at : float
+        Monotonic timestamp when the pipeline finished.
+    """
+
     results     : list[DateResult] = field(default_factory=list)
     started_at  : float            = field(default_factory=time.monotonic)
     finished_at : float            = 0.0
