@@ -25,14 +25,12 @@ from datetime import date
 from pathlib import Path
 from typing import Final
 
-import boto3
 import requests
-from botocore.exceptions import BotoCoreError, ClientError
 
+from ..common import StageStatus, upload_file_to_s3
 from ..config import settings
 from ..paths import PATHS_B3
 from ._feed import FeedType
-from ._models import StageStatus
 
 logger = logging.getLogger(__name__)
 
@@ -40,62 +38,6 @@ logger = logging.getLogger(__name__)
 
 _VALID_CONTENT_TYPES : Final[tuple[str, ...]] = ("zip", "octet-stream")
 _CHUNK_SIZE          : Final[int]             = 8_192
-
-
-# --- Internal helpers ---
-
-def _build_s3_client() -> "boto3.client":
-    return boto3.client(
-        "s3",
-        region_name           = settings.AWS_S3_REGION,
-        aws_access_key_id     = settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key = settings.AWS_SECRET_ACCESS_KEY,
-    )
-
-
-def _upload_to_s3(local_path: Path, s3_prefix: str) -> StageStatus:
-    """
-    Upload a local ZIP file to the configured S3 bucket.
-
-    Parameters
-    ----------
-    local_path : Path
-        Absolute path to the file to upload.
-    s3_prefix : str
-        S3 key prefix for the target feed (e.g. ``"b3/bdi/tick_by_tick_rv/"``).
-
-    Returns
-    -------
-    StageStatus
-        ``SUCCESS`` on successful upload, ``SKIPPED`` if the object already
-        exists, or ``FAILED`` on error.
-    """
-    s3_key = s3_prefix + local_path.name
-
-    try:
-        client = _build_s3_client()
-
-        # Avoid redundant uploads — check existence before transferring.
-        try:
-            client.head_object(Bucket=settings.AWS_S3_BUCKET_B3, Key=s3_key)
-            logger.info("S3 object already exists, skipping upload: %s", s3_key)
-            return StageStatus.SKIPPED
-        except ClientError as exc:
-            # 404 means the object does not exist yet — proceed with upload.
-            if exc.response["Error"]["Code"] != "404":
-                raise
-
-        client.upload_file(
-            Filename = str(local_path),
-            Bucket   = settings.AWS_S3_BUCKET_B3,
-            Key      = s3_key,
-        )
-        logger.info("Uploaded to S3: s3://%s/%s", settings.AWS_S3_BUCKET_B3, s3_key)
-        return StageStatus.SUCCESS
-
-    except (BotoCoreError, ClientError) as exc:
-        logger.error("S3 upload failed for %s: %s", local_path.name, exc)
-        return StageStatus.FAILED
 
 
 # --- Public API ---
@@ -145,7 +87,11 @@ def download_zip(
     if save_path.exists():
         logger.info("[%s] Already downloaded: %s", cfg.label, save_path.name)
         if upload_to_s3:
-            s3_status = _upload_to_s3(save_path, cfg.s3_prefix)
+            s3_status = upload_file_to_s3(
+                local_path = save_path,
+                bucket     = settings.AWS_S3_BUCKET_B3,
+                key        = cfg.s3_prefix + save_path.name,
+            )
         return save_path, StageStatus.SKIPPED, s3_status
 
     # --- HTTP download ---
@@ -190,6 +136,10 @@ def download_zip(
 
     # --- S3 upload ---
     if upload_to_s3:
-        s3_status = _upload_to_s3(save_path, cfg.s3_prefix)
+        s3_status = upload_file_to_s3(
+            local_path = save_path,
+            bucket     = settings.AWS_S3_BUCKET_B3,
+            key        = cfg.s3_prefix + save_path.name,
+        )
 
     return save_path, StageStatus.SUCCESS, s3_status
