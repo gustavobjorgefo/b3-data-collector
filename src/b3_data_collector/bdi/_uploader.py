@@ -2,40 +2,32 @@
 
 """
 S3 uploader for BDI report CSVs.
-...
+
+Builds the Hive-style partitioned S3 key for a given report and trading
+date, and delegates the actual upload to the shared helpers in
+``common.py``. Key structure is BDI-specific and therefore lives here,
+not in ``common.py``.
+
+Key format
+----------
+b3/bdi/reports/{section}/{api_name}/year={YYYY}/{YYYY-MM-DD}.csv
 """
 
 from __future__ import annotations
 
-import io
-import logging
 from datetime import date
 from typing import Final
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
-
+from ..common import StageStatus, upload_bytes_to_s3
 from ..config import settings
-from ..common import StageStatus
-
-logger = logging.getLogger(__name__)
 
 # --- Module constants ---
 
-_S3_KEY_PREFIX  : Final[str] = "b3/bdi/reports/"
-_CONTENT_TYPE   : Final[str] = "text/csv"
+_S3_KEY_PREFIX : Final[str] = "b3/bdi/reports/"
+_CONTENT_TYPE  : Final[str] = "text/csv"
 
 
 # --- Internal helpers ---
-
-def _build_s3_client() -> "boto3.client":
-    return boto3.client(
-        "s3",
-        region_name           = settings.AWS_S3_REGION,
-        aws_access_key_id     = settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key = settings.AWS_SECRET_ACCESS_KEY,
-    )
-
 
 def _build_s3_key(section: str, api_name: str, trade_date: date) -> str:
     return (
@@ -56,31 +48,34 @@ def upload_csv(
     trade_date : date,
     overwrite  : bool = False,
 ) -> StageStatus:
+    """
+    Upload a single BDI report CSV to S3 under its Hive-partitioned key.
+
+    Parameters
+    ----------
+    content : bytes
+        Raw CSV bytes as returned by ``fetch_report_csv``.
+    section : str
+        Top-level report section (e.g. ``"renda_variavel"``).
+    api_name : str
+        BDI API name of the report (e.g. ``"DailyAverageStocks"``).
+    trade_date : date
+        Trading date the report refers to.
+    overwrite : bool, optional
+        If ``True``, re-uploads even when the object already exists.
+        Default is ``False``.
+
+    Returns
+    -------
+    StageStatus
+        ``SUCCESS``, ``SKIPPED``, or ``FAILED``.
+    """
     s3_key = _build_s3_key(section, api_name, trade_date)
 
-    try:
-        client = _build_s3_client()
-
-        if not overwrite:
-            try:
-                client.head_object(Bucket=settings.AWS_S3_BUCKET_B3, Key=s3_key)
-                logger.info("S3 object already exists, skipping: %s", s3_key)
-                return StageStatus.SKIPPED
-            except ClientError as exc:
-                if exc.response["Error"]["Code"] != "404":
-                    raise
-
-        client.upload_fileobj(
-            Fileobj     = io.BytesIO(content),
-            Bucket      = settings.AWS_S3_BUCKET_B3,
-            Key         = s3_key,
-            ExtraArgs   = {"ContentType": _CONTENT_TYPE},
-        )
-        logger.info(
-            "Uploaded: s3://%s/%s", settings.AWS_S3_BUCKET_B3, s3_key
-        )
-        return StageStatus.SUCCESS
-
-    except (BotoCoreError, ClientError) as exc:
-        logger.error("S3 upload failed for '%s': %s", s3_key, exc)
-        return StageStatus.FAILED
+    return upload_bytes_to_s3(
+        content      = content,
+        bucket       = settings.AWS_S3_BUCKET_B3,
+        key          = s3_key,
+        content_type = _CONTENT_TYPE,
+        overwrite    = overwrite,
+    )
