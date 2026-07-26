@@ -27,81 +27,20 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, timedelta
-from typing import Final
+from datetime import date
 
 import requests
 
+from ..common import StageStatus, resolve_dates
 from ._catalog import ENABLED_REPORTS
 from ._client import fetch_report_csv
 from ._models import BdiPipelineResult, ReportResult, ReportStatus
 from ._uploader import upload_csv
-from ..common import StageStatus
 
 logger = logging.getLogger(__name__)
 
-_WEEKEND_CUTOFF: Final[int] = 5
-
 
 # --- Internal helpers ---
-
-def _parse_date(value: str | date) -> date:
-    if isinstance(value, date):
-        return value
-    return date.fromisoformat(value)
-
-
-def _business_days_in_range(start: date, end: date) -> list[date]:
-    """Return all Mon–Fri dates between ``start`` and ``end``, inclusive."""
-    total = (end - start).days + 1
-    return [
-        start + timedelta(days=i)
-        for i in range(total)
-        if (start + timedelta(days=i)).weekday() < _WEEKEND_CUTOFF
-    ]
-
-
-def _resolve_dates(
-    dates: str | date | list[str | date] | tuple[str | date, str | date],
-) -> list[date]:
-    """
-    Resolve any accepted date input into a sorted list of unique dates.
-
-    Parameters
-    ----------
-    dates : str | date | list | tuple
-        Trading dates in any accepted form.
-
-    Returns
-    -------
-    list[date]
-
-    Raises
-    ------
-    TypeError
-        If ``dates`` is not one of the accepted types.
-    ValueError
-        If a tuple does not have exactly 2 elements.
-    """
-    if isinstance(dates, (str, date)):
-        return [_parse_date(dates)]
-
-    if isinstance(dates, tuple):
-        if len(dates) != 2:
-            raise ValueError(
-                f"A tuple input must have exactly 2 elements (start, end). "
-                f"Got {len(dates)}."
-            )
-        return _business_days_in_range(_parse_date(dates[0]), _parse_date(dates[1]))
-
-    if isinstance(dates, list):
-        return sorted({_parse_date(d) for d in dates})
-
-    raise TypeError(
-        f"Unsupported dates type: {type(dates).__name__}. "
-        "Expected str, date, list, or tuple."
-    )
-
 
 def _run_single_report(
     api_name   : str,
@@ -201,7 +140,7 @@ def run_bdi_pipeline(
     BdiPipelineResult
         Structured result with per-report outcomes and aggregate statistics.
     """
-    date_list       = _resolve_dates(dates)
+    date_list       = resolve_dates(dates)
     pipeline_result = BdiPipelineResult(started_at=time.monotonic())
     enabled_count   = len(ENABLED_REPORTS)
 
