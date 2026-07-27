@@ -77,7 +77,7 @@ class TestDownloadZip:
         existing_file = rv_downloads_dir / filename
         existing_file.write_bytes(b"already here")
 
-        path, dl_status, s3_status = _downloader.download_zip(
+        path, dl_status, _s3_status = _downloader.download_zip(
             trade_date=sample_trade_date,
             feed=FeedType.RV,
             upload_to_s3=False,
@@ -93,7 +93,7 @@ class TestDownloadZip:
         url = cfg.url_template.format(date=f"{sample_trade_date:%Y-%m-%d}")
         requests_mock.get(url, status_code=404)
 
-        path, dl_status, s3_status = _downloader.download_zip(
+        path, dl_status, _s3_status = _downloader.download_zip(
             trade_date=sample_trade_date,
             feed=FeedType.RV,
             upload_to_s3=False,
@@ -109,7 +109,7 @@ class TestDownloadZip:
         url = cfg.url_template.format(date=f"{sample_trade_date:%Y-%m-%d}")
         requests_mock.get(url, exc=requests.exceptions.ConnectionError)
 
-        path, dl_status, s3_status = _downloader.download_zip(
+        path, dl_status, _s3_status = _downloader.download_zip(
             trade_date=sample_trade_date,
             feed=FeedType.RV,
             upload_to_s3=False,
@@ -129,7 +129,7 @@ class TestDownloadZip:
             headers={"Content-Type": "text/html"},
         )
 
-        path, dl_status, s3_status = _downloader.download_zip(
+        path, dl_status, _s3_status = _downloader.download_zip(
             trade_date=sample_trade_date,
             feed=FeedType.RV,
             upload_to_s3=False,
@@ -151,7 +151,7 @@ class TestDownloadZipWithS3Upload:
             headers={"Content-Type": "application/zip"},
         )
 
-        path, dl_status, s3_status = _downloader.download_zip(
+        _path, dl_status, s3_status = _downloader.download_zip(
             trade_date=sample_trade_date,
             feed=FeedType.RV,
             upload_to_s3=True,
