@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 # --- Module constants ---
 
-_WEEKEND_CUTOFF: Final[int] = 5  # weekday() returns 0-4 for Mon–Fri
+_WEEKEND_CUTOFF: Final[int] = 5  # weekday() returns 0-4 for Mon-Fri
 
 B3_TIMEZONE: Final = ZoneInfo("America/Sao_Paulo")
 
