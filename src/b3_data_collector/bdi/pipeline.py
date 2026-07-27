@@ -145,7 +145,7 @@ def run_bdi_pipeline(
     enabled_count   = len(ENABLED_REPORTS)
 
     logger.info(
-        "BDI pipeline starting — %d date(s) × %d reports = %d requests",
+        "BDI pipeline starting — %d date(s) x %d reports = %d requests",
         len(date_list), enabled_count, len(date_list) * enabled_count,
     )
     logger.info(
