@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # b3_data_collector/bdi/run_daily.py
 
 """

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # b3_data_collector/tick_by_tick/run_daily.py
 
 """
