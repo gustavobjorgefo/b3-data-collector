@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import io
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum, auto
 from pathlib import Path
 from typing import Final
+from zoneinfo import ZoneInfo
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -29,6 +30,8 @@ logger = logging.getLogger(__name__)
 # --- Module constants ---
 
 _WEEKEND_CUTOFF: Final[int] = 5  # weekday() returns 0–4 for Mon–Fri
+
+B3_TIMEZONE: Final = ZoneInfo("America/Sao_Paulo")
 
 
 class StageStatus(Enum):
@@ -52,6 +55,21 @@ class StageStatus(Enum):
     SKIPPED     = auto()
     UNAVAILABLE = auto()
     FAILED      = auto()
+
+
+# --- Timezone-aware "today" ---
+
+def today_b3() -> date:
+    """
+    Return today's date in B3's local timezone (America/Sao_Paulo).
+
+    Prefer this over ``date.today()`` for anything computing "today" or
+    "yesterday" relative to a B3 trading session — ``date.today()`` uses
+    the timezone of the machine running the code, which drifts from B3's
+    actual trading day near midnight BRT if that machine runs in a
+    different timezone (e.g. a server or CI runner in UTC).
+    """
+    return datetime.now(tz=B3_TIMEZONE).date()
 
 
 # --- Date resolution ---
