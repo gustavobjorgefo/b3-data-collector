@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import sys
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Final
 
@@ -18,8 +18,9 @@ _SRC_DIR: Final[Path] = Path(__file__).resolve().parents[2]
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from b3_data_collector.paths import LOGS_DIR
 from b3_data_collector.bdi.pipeline import run_bdi_pipeline
+from b3_data_collector.common import today_b3
+from b3_data_collector.paths import LOGS_DIR
 
 
 def _configure_logging() -> None:
@@ -53,7 +54,7 @@ def main() -> None:
     logger.info("b3-data-collector — BDI Reports Pipeline starting")
     logger.info("=" * 60)
 
-    trade_date = date.today() - timedelta(days=1)
+    trade_date = today_b3() - timedelta(days=1)
     logger.info("Target date: %s", trade_date)
 
     result = run_bdi_pipeline(dates=trade_date)
