@@ -65,7 +65,7 @@ def main() -> None:
     logger.info("b3-data-collector — Tick-by-Tick Daily Pipeline starting")
     logger.info("=" * 60)
 
-    trade_date = trade_date = today_b3() - timedelta(days=1)
+    trade_date = today_b3() - timedelta(days=1)
     logger.info("Target date: %s", trade_date)
 
     # --- RV feed ---
