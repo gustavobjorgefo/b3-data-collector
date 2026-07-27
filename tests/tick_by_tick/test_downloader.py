@@ -4,16 +4,15 @@
 
 from __future__ import annotations
 
+import boto3
 import pytest
 import requests
-
-import boto3
 from moto import mock_aws
 
 from b3_data_collector.common import StageStatus
+from b3_data_collector.config import Settings
 from b3_data_collector.tick_by_tick import _downloader
 from b3_data_collector.tick_by_tick._feed import FeedType
-from b3_data_collector.config import Settings
 
 
 @pytest.fixture

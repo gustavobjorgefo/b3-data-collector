@@ -156,7 +156,7 @@ def resolve_dates(
 
 # --- S3 access ---
 
-def build_s3_client() -> "boto3.client":
+def build_s3_client() -> boto3.client:
     """
     Build a boto3 S3 client from the module-level settings.
 
@@ -173,7 +173,7 @@ def build_s3_client() -> "boto3.client":
     )
 
 
-def s3_object_exists(client: "boto3.client", bucket: str, key: str) -> bool:
+def s3_object_exists(client: boto3.client, bucket: str, key: str) -> bool:
     """
     Check whether an object exists in S3 without downloading it.
 

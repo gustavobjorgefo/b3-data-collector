@@ -10,13 +10,11 @@ convention tied to the file name "conftest.py".
 
 from __future__ import annotations
 
-from datetime import date
-
-import pytest
-
 import shutil
+from datetime import date
 from pathlib import Path
 
+import pytest
 
 # --- Constants ---
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"

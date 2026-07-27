@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum, auto
 
-
 # --- Report status ---
 
 class ReportStatus(Enum):

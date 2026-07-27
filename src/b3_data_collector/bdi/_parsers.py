@@ -29,8 +29,8 @@ Adding support for another report is the main way this module grows:
 from __future__ import annotations
 
 import io
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 

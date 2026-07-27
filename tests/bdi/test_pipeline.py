@@ -6,22 +6,23 @@ from __future__ import annotations
 
 from datetime import date
 
-import pytest
-
 import boto3
+import pytest
 from moto import mock_aws
 
 from b3_data_collector.bdi import _uploader
 from b3_data_collector.bdi._models import ReportStatus
 from b3_data_collector.bdi.pipeline import run_bdi_pipeline
-from b3_data_collector.config import Settings
-
-
 from b3_data_collector.common import (
     business_days_in_range as _business_days_in_range,
+)
+from b3_data_collector.common import (
     parse_date as _parse_date,
+)
+from b3_data_collector.common import (
     resolve_dates as _resolve_dates,
 )
+from b3_data_collector.config import Settings
 
 
 class TestParseDate:

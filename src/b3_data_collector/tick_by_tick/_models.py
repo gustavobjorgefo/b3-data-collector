@@ -16,7 +16,7 @@ from datetime import date
 
 from ..common import StageStatus
 
-__all__ = ["StageStatus", "DateResult", "PipelineResult"]
+__all__ = ["DateResult", "PipelineResult", "StageStatus"]
 
 
 # --- Per-date result ---
