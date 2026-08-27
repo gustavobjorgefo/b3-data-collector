@@ -1,8 +1,8 @@
-# tests/bdi/test_parsers.py
+# tests/bdi/parsers/test_btb_loan_balance.py
 
 """
-Unit tests for bdi/_parsers.py — BTBLoanBalance parser and registry
-dispatch. No I/O beyond in-memory bytes; no network, no S3, no disk.
+Unit tests for bdi/parsers/_btb_loan_balance.py — parsing and dispatch
+through the public package. No I/O beyond in-memory bytes.
 """
 
 from __future__ import annotations
@@ -10,11 +10,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from b3_data_collector.bdi._parsers import read_bdi_report_file, read_btb_loan_balance
+from b3_data_collector.bdi.parsers import read_bdi_report_file
+from b3_data_collector.bdi.parsers._btb_loan_balance import read_btb_loan_balance
 
-# Minimal, structurally faithful sample: 5 discarded header rows (matching
-# the real B3 export layout), then 2 data rows — one complete, one with an
-# empty contracts_count to exercise the nullable Int64 path.
 _SAMPLE_BTB_CSV = (
     "Descriptive paragraph line, discarded\n"
     "Glossary link, discarded\n"
@@ -59,18 +57,16 @@ class TestReadBtbLoanBalance:
 
         assert df["contracts_count"].dtype == "Int64"
         assert df["contracts_count"].iloc[0] == 10
-        # Second row's empty field must become a proper null, not 0 or NaN-as-float
         assert pd.isna(df["contracts_count"].iloc[1])
 
     def test_percentage_columns_converted_to_float(self):
         df = read_btb_loan_balance(_SAMPLE_BTB_CSV)
 
-        # "2,92%"-style semantics: raw value 2,92 -> 0.0292
         assert df["borrower_rate_min"].iloc[0] == pytest.approx(0.0292)
         assert df["donor_rate_avg"].iloc[1] == pytest.approx(0.0120)
 
 
-class TestReadBdiReportFile:
+class TestReadBdiReportFileDispatch:
     def test_dispatches_to_registered_parser(self):
         df = read_bdi_report_file(_SAMPLE_BTB_CSV, report_name="BTBLoanBalance")
 

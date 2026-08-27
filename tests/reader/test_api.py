@@ -45,7 +45,7 @@ def s3_bucket(fake_settings, monkeypatch):
         yield client
 
 
-# Minimal BTBLoanBalance-shaped CSV, same layout used in test_parsers.py
+# Minimal BTBLoanBalance-shaped CSV, same layout used in tests/bdi/parsers/test_btb_loan_balance.py
 _SAMPLE_BTB_CSV = (
     "Descriptive paragraph line, discarded\n"
     "Glossary link, discarded\n"
