@@ -3,7 +3,7 @@
 """
 Public reader API — turns S3-collected data into pandas DataFrames.
 
-BDI reports are parsed via the registry in ``bdi/_parsers.py`` (one
+BDI reports are parsed via the registry in ``bdi/parsers/`` (one
 parser per report, since layouts vary); tick-by-tick data is read
 directly, since both feeds share a single canonical schema and require
 no per-report parsing.
@@ -29,7 +29,7 @@ from datetime import date
 
 import pandas as pd
 
-from ..bdi._parsers import read_bdi_report_file
+from ..bdi.parsers import read_bdi_report_file
 from ..common import resolve_dates
 from ..tick_by_tick import FeedType
 from ._client import fetch_bdi_report_bytes, fetch_tick_by_tick_bytes
@@ -50,7 +50,7 @@ def read_bdi_report(api_name: str, dates: DateInput) -> pd.DataFrame:
     api_name : str
         BDI API name of the report (e.g. ``"BTBLoanBalance"``), as defined
         in ``b3_data_collector.bdi._catalog``. A parser must be registered
-        for this report in ``b3_data_collector.bdi._parsers``.
+        for this report in ``b3_data_collector.bdi.parsers``.
     dates : str | date | list[str | date] | tuple[str | date, str | date]
         Trading dates to read:
 

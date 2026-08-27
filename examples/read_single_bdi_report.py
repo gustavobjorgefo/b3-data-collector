@@ -5,7 +5,7 @@ Example: reading a single downloaded BDI report file.
 
 The actual parsing logic — the registry mapping a BDI ``api_name`` to its
 own dedicated parser function — lives in the library itself
-(``b3_data_collector.bdi._parsers``), since the reader subpackage needs
+(``b3_data_collector.bdi.parsers``), since the reader subpackage needs
 the exact same parsers to turn S3 bytes into DataFrames. This script is
 just a thin demonstration of calling that shared parsing engine against
 a local file.
@@ -13,7 +13,7 @@ a local file.
 Only one parser is implemented so far — BTBLoanBalance ("Empréstimos
 registrados"), the report this project actually consumes. Adding support
 for another report is a good first contribution for anyone extending
-this project — see ``b3_data_collector.bdi._parsers`` for how to add one.
+this project — see ``b3_data_collector.bdi.parsers`` for how to add one.
 
 Run this script directly to see it in action against the sample file
 in examples/sample_data/.
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from b3_data_collector.bdi._parsers import read_bdi_report_file
+from b3_data_collector.bdi.parsers import read_bdi_report_file
 
 _SAMPLE_DATA_DIR = Path(__file__).resolve().parent / "sample_data"
 

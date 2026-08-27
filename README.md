@@ -54,7 +54,7 @@ b3-data-collector/
 │       │                       helpers, and status vocabulary (StageStatus) — reused by
 │       │                       bdi/, tick_by_tick/, and reader/
 │       ├── bdi/                 BDI report ingestion (catalog, client, uploader, pipeline)
-│       │                       and parsing (_parsers.py — one parser per report, by api_name)
+│       │                       and parsing (parsers/ — one parser per report, by api_name)
 │       ├── tick_by_tick/        Tick-by-tick ingestion (downloader, extractor, partitioner,
 │       │                       pipeline) for both the RV and DERIV feeds
 │       └── reader/              Read-access layer — pulls already-collected CSV/Parquet
@@ -90,7 +90,7 @@ B3 distribution ZIP  ->  download  ->  extract  ->  partition  ->  upload ticks
 **Read access.** The `reader` subpackage is the inverse of collection — it never talks to B3 directly, only to S3:
 
 ```text
-S3 (CSV or Parquet)  ->  reader/_client.py  ->  bdi/_parsers.py (BDI only)  ->  DataFrame
+S3 (CSV or Parquet)  ->  reader/_client.py  ->  bdi/parsers/ (BDI only)  ->  DataFrame
                          (download bytes,        (per-report parsing;
                           same partition keys     tick-by-tick has a single
                           used at upload time)     canonical schema, no
@@ -188,7 +188,7 @@ pytest --cov=b3_data_collector --cov-report=term-missing
 
 See [`examples/`](examples/) for two runnable scripts against real (trimmed) B3 data:
 
-- **[`read_single_bdi_report.py`](examples/read_single_bdi_report.py)** — calls the library's own BDI parser registry (`b3_data_collector.bdi._parsers`) against a local sample CSV. The same parsers are used by `reader.read_bdi_report()` against bytes downloaded from S3 — this example just demonstrates the parsing step in isolation, without needing S3 access.
+- **[`read_single_bdi_report.py`](examples/read_single_bdi_report.py)** — calls the library's own BDI parser registry (`b3_data_collector.bdi.parsers`) against a local sample CSV. The same parsers are used by `reader.read_bdi_report()` against bytes downloaded from S3 — this example just demonstrates the parsing step in isolation, without needing S3 access.
 - **[`read_tick_by_tick_parquet.py`](examples/read_tick_by_tick_parquet.py)** — runs the real extraction/partitioning pipeline stages and reads the resulting tick-level Parquet.
 
 ## Report Catalog
@@ -202,7 +202,8 @@ The BDI catalog covers 60+ reports across fixed income, equities, options, and i
 
 ## Roadmap
 
-- **BDI report parsers** — most reports don't have a dedicated parser yet. Adding one is: write a `read_<report_name>(source) -> pd.DataFrame` function in `bdi/_parsers.py` following the shape of `read_btb_loan_balance`, and register it in `_READERS` — that's the entire integration surface, since `reader.read_bdi_report()` and the example script both dispatch through the same registry. A good first contribution.
+- **BDI report parsers** — most reports don't have a dedicated parser yet. Adding one is: create `bdi/parsers/_<report_name>.py` with a `read_<report_name>(source) -> pd.DataFrame` function decorated with `@register_parser("<ApiName>")`, following the shape of `_btb_loan_balance.py`, and import the module in `bdi/parsers/__init__.py` — that's the entire integration surface, since `reader.read_bdi_report()` and the
+example script both dispatch through the same registry. A good first contribution.
 - **Storage backend abstraction** — S3 is currently hardcoded as the only archival/read destination. A `StorageBackend` interface (S3, local disk, others) would let users choose where files are archived and read from, without modifying pipeline or reader code.
 - **Notifications** — a lightweight, optional run-summary notifier (email or webhook), reintroduced without hardcoding any specific provider.
 - **DERIV example** — a `read_tick_by_tick_parquet.py`-style example for the derivatives feed (`sample_deriv.zip` is already available in `examples/sample_data/`).
