@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from . import (
     _btb_loan_balance,  # noqa: F401  (imported for @register_parser side effect)
+    _instruments_derivatives,  # noqa: F401  (imported for @register_parser side effect)
     _instruments_equities,  # noqa: F401  (imported for @register_parser side effect)
 )
 from ._registry import read_bdi_report_file
