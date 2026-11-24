@@ -7,6 +7,8 @@ Orchestrates the four-stage data ingestion process for B3 tick data,
 supporting both the equities (RV) and derivatives (DERIV) feeds via the
 ``FeedType`` parameter:
 
+    Stage 0 — Check     : unless ``overwrite=True`` or ``upload_to_s3=False``,
+                          skip a date whose ZIP and ticks are both in S3.
     Stage 1 — Download  : fetches the raw ZIP from B3's distribution endpoint
                           and uploads it to S3 as an immutable archive.
     Stage 2 — Extract   : parses the ZIP, normalises types, renames columns
@@ -35,13 +37,21 @@ import logging
 import time
 from datetime import date
 
-from ..common import StageStatus, require_s3_bucket, resolve_dates
+from botocore.exceptions import BotoCoreError, ClientError
+
+from ..common import (
+    StageStatus,
+    build_s3_client,
+    require_s3_bucket,
+    resolve_dates,
+    s3_object_exists,
+)
 from ..config import settings
-from ._downloader import download_zip
+from ._downloader import _build_s3_key_zip, download_zip
 from ._extractor import extract_to_raw_parquet
 from ._feed import FeedType
 from ._models import DateResult, PipelineResult
-from ._partitioner import partition_to_ticks
+from ._partitioner import _build_s3_key_ticks, partition_to_ticks
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +73,42 @@ def _append_error(result: DateResult, message: str) -> None:
         Human-readable description of the failure.
     """
     result.error = message if result.error is None else f"{result.error}; {message}"
+
+
+def _is_archived_in_s3(trade_date: date, feed: FeedType) -> bool:
+    """
+    Check whether both S3 artifacts of a date already exist.
+
+    A date counts as archived only when the raw ZIP **and** the ticks
+    Parquet are in S3: if either is missing, the pipeline must still run
+    to produce and upload it.
+
+    Parameters
+    ----------
+    trade_date : date
+        Trading date to check.
+    feed : FeedType
+        Feed selector (``FeedType.RV`` or ``FeedType.DERIV``).
+
+    Returns
+    -------
+    bool
+        ``True`` if both objects exist.
+
+    Raises
+    ------
+    botocore.exceptions.BotoCoreError
+        For client-side or connection errors.
+    botocore.exceptions.ClientError
+        For any S3 error response other than a 404 (e.g. access denied).
+    """
+    cfg    = feed.config
+    client = build_s3_client()
+    bucket = settings.AWS_S3_BUCKET_B3
+    return (
+        s3_object_exists(client, bucket, _build_s3_key_zip(cfg, trade_date))
+        and s3_object_exists(client, bucket, _build_s3_key_ticks(cfg.s3_prefix_ticks, trade_date))
+    )
 
 
 def _run_single_date(
@@ -94,13 +140,35 @@ def _run_single_date(
         Enable S3 upload during the download stage and the ticks upload
         during the partitioning stage.
     overwrite : bool
-        Re-run stages even when output already exists.
+        Re-run stages even when output already exists. When ``False`` and
+        ``upload_to_s3`` is ``True``, a date already archived in S3 is
+        skipped before any stage runs.
 
     Returns
     -------
     DateResult
     """
     result = DateResult(trade_date=trade_date)
+
+    # --- Stage 0: Skip dates already archived ---
+    # Local files are not a reliable "done" marker once retention deletes
+    # them; S3 is. Two HEAD requests replace a ~50 MB download from B3.
+    # Only when uploading: a local-only run (upload_to_s3=False) wants the
+    # local files, whatever S3 holds.
+    if upload_to_s3 and not overwrite:
+        try:
+            if _is_archived_in_s3(trade_date, feed):
+                logger.info(
+                    "[%s] Already in S3, skipping %s.", feed.config.label, trade_date
+                )
+                return result
+        except (BotoCoreError, ClientError) as exc:
+            # Not fatal: running the stages is still correct, and a real S3
+            # problem will surface as a failed upload.
+            logger.warning(
+                "[%s] S3 check failed for %s, running the stages: %s",
+                feed.config.label, trade_date, exc,
+            )
 
     # --- Stage 1: Download ---
     if download:
