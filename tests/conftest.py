@@ -145,6 +145,7 @@ TICK_TXT_HEADER = (
 
 def tick_line(
     time_raw: str = "100000006",
+    reference_date: str = "2026-06-30",
     quantity: str = "1",
     update_action: str = "0",
     trade_date: str = "2026-06-30",
@@ -155,7 +156,7 @@ def tick_line(
 ) -> str:
     """One well-formed TXT data line; override a field to break it."""
     return (
-        f"2026-06-30;BAIQ39;{update_action};{price};{quantity};{time_raw};{trade_id};1;"
+        f"{reference_date};BAIQ39;{update_action};{price};{quantity};{time_raw};{trade_id};1;"
         f"{trade_date};{buyer};{seller};2"
     )
 

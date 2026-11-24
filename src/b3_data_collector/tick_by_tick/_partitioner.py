@@ -5,7 +5,7 @@ B3 tick data partitioner — Stage 3.
 
 Responsible for reading the raw daily Parquet produced by the extraction
 stage, building the time-zone-aware ``timestamp`` column from
-``trade_date`` and ``time_raw``, shaping the result to the tick contract
+``reference_date`` and ``time_raw``, shaping the result to the tick contract
 (``_contract.py``), recording the file's provenance in the Parquet footer,
 persisting it under the feed-specific ticks directory, and uploading the
 final Parquet to S3.
@@ -17,6 +17,12 @@ correct input/output paths and S3 prefix via ``FeedType.config``.
 Contract rules applied here:
 
 - Rows keep the TXT order; nothing is sorted or dropped.
+- ``timestamp`` is built from ``reference_date``, the calendar day of the
+  file, never from ``trade_date``. ``trade_date`` is the session the trade
+  belongs to, and B3 sets it to the next session for some derivatives
+  traded late in the afternoon (and to the previous one for a batch
+  published around 02:30): combining it with the time would move those
+  trades by days.
 - The row count must equal the TXT data line count recorded by the
   extractor, or the date fails with ``ContractViolationError``.
 - A ``time_raw`` that is not a valid ``HHMMSSmmm`` time yields a null
@@ -109,9 +115,9 @@ def _validate_output(
         )
 
 
-def _build_timestamp(trade_date: pd.Series, time_raw: pd.Series) -> pd.Series:
+def _build_timestamp(reference_date: pd.Series, time_raw: pd.Series) -> pd.Series:
     """
-    Combine the trade date and the raw B3 time into a time-zone-aware timestamp.
+    Combine the calendar date and the raw B3 time into a time-zone-aware timestamp.
 
     B3 publishes ``HoraFechamento`` in local time (UTC-3) as ``HHMMSSmmm``.
     The format is explicit, never inferred, and anything that is not
@@ -119,8 +125,9 @@ def _build_timestamp(trade_date: pd.Series, time_raw: pd.Series) -> pd.Series:
 
     Parameters
     ----------
-    trade_date : pd.Series
-        ``YYYY-MM-DD`` text, already validated by the extractor.
+    reference_date : pd.Series
+        Calendar day the trade happened, ``YYYY-MM-DD``; the extractor
+        checked it equals the file's trading date.
     time_raw : pd.Series
         Time text exactly as found in the TXT.
 
@@ -133,7 +140,7 @@ def _build_timestamp(trade_date: pd.Series, time_raw: pd.Series) -> pd.Series:
     # Separators pin each field to two digits: without them "%H" also
     # accepts one digit, and "250000000" would parse as 02:50:00.
     combined = (
-        trade_date + " "
+        reference_date + " "
         + time_raw.str.slice(0, 2) + ":" + time_raw.str.slice(2, 4) + ":"
         + time_raw.str.slice(4, 6) + "." + time_raw.str.slice(6, 9)
     ).where(is_well_formed)
@@ -171,7 +178,7 @@ def partition_to_ticks(
     """
     Build the contract ticks Parquet from the raw daily Parquet.
 
-    Builds the ``timestamp`` column from ``trade_date`` and ``time_raw``,
+    Builds the ``timestamp`` column from ``reference_date`` and ``time_raw``,
     shapes the result to the tick contract, validates it, writes it with
     its provenance to the feed-specific ticks directory, deletes the now
     redundant raw Parquet, and uploads the result to S3 (unless
@@ -242,7 +249,7 @@ def partition_to_ticks(
     df        = raw_table.to_pandas()
 
     # --- Timestamp construction ---
-    df["timestamp"] = _build_timestamp(df["trade_date"], df["time_raw"])
+    df["timestamp"] = _build_timestamp(df["reference_date"], df["time_raw"])
 
     # --- Validation ---
     _validate_output(df, source, trade_date, cfg.label)

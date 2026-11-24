@@ -30,8 +30,14 @@ Contract rules applied here — any violation fails the date with
 - The header must list exactly the 12 columns above, in order.
 - Every data line must have exactly 12 fields.
 - The ZIP must hold exactly one TXT for the date.
-- Dates must be valid ``YYYY-MM-DD``; price, quantity, trade id and the
-  three code columns must convert to their contract types.
+- ``DataReferencia`` must equal the file's trading date on every row: it
+  is the calendar day the trade happened, which the partitioner uses to
+  build ``timestamp``.
+- ``DataNegocio`` must be a valid ``YYYY-MM-DD``. It is the session the
+  trade belongs to and may differ from the file's date: B3 assigns some
+  derivatives traded late in the afternoon to the next session.
+- Price, quantity, trade id and the three code columns must convert to
+  their contract types.
 
 Tolerated: an unreadable ``HoraFechamento`` is kept verbatim in
 ``time_raw`` (the partitioner turns it into a null timestamp), and an
@@ -304,7 +310,25 @@ def _is_iso_date(text: str) -> bool:
     return True
 
 
-def _convert(df: pd.DataFrame, line_numbers: npt.NDArray[np.int32], label: str) -> pd.DataFrame:
+def _validate_reference_date(
+    values       : pd.Series,
+    file_date    : str,
+    line_numbers : npt.NDArray[np.int32],
+    label        : str,
+) -> pd.Series:
+    # The timestamp is built from this column, so a row from another
+    # calendar day would get a wrong time without any visible sign.
+    invalid = (values != file_date).to_numpy()
+    _reject_invalid("DataReferencia", values, invalid, line_numbers, label)
+    return values
+
+
+def _convert(
+    df           : pd.DataFrame,
+    line_numbers : npt.NDArray[np.int32],
+    file_date    : str,
+    label        : str,
+) -> pd.DataFrame:
     """
     Convert the text columns to their contract types and English names.
 
@@ -314,6 +338,8 @@ def _convert(df: pd.DataFrame, line_numbers: npt.NDArray[np.int32], label: str) 
         TXT content, every column as text, original Portuguese names.
     line_numbers : npt.NDArray[np.int32]
         TXT line number of each row, from ``_scan_lines``.
+    file_date : str
+        Trading date of the file, ``YYYY-MM-DD``.
     label : str
         Feed label for messages.
 
@@ -337,8 +363,8 @@ def _convert(df: pd.DataFrame, line_numbers: npt.NDArray[np.int32], label: str) 
         "source_row"     : line_numbers,
         "symbol"         : df["CodigoInstrumento"],
         "trade_date"     : _validate_dates("DataNegocio", df["DataNegocio"], line_numbers, label),
-        "reference_date" : _validate_dates(
-            "DataReferencia", df["DataReferencia"], line_numbers, label
+        "reference_date" : _validate_reference_date(
+            df["DataReferencia"], file_date, line_numbers, label
         ),
         "time_raw"       : df["HoraFechamento"],
         "price"          : _convert_price(df["PrecoNegocio"], line_numbers, label),
@@ -439,7 +465,7 @@ def extract_to_raw_parquet(
             f"but the file has {len(line_numbers)} data lines."
         )
 
-    df = _convert(text_columns, line_numbers, cfg.label)
+    df = _convert(text_columns, line_numbers, f"{trade_date}", cfg.label)
 
     provenance = SourceProvenance(
         feed                 = feed.name,

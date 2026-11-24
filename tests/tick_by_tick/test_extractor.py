@@ -229,6 +229,8 @@ class TestExtractorContractRules:
             ({"price": "1,2,3"},           "PrecoNegocio"),
             ({"trade_id": "-1"},           "CodigoIdentificadorNegocio"),
             ({"trade_date": "2026-02-30"}, "DataNegocio"),
+            # Must be the file's date: the timestamp is built from it.
+            ({"reference_date": "2026-07-01"}, "DataReferencia"),
         ],
     )
     def test_unconvertible_value_fails(

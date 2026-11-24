@@ -133,6 +133,30 @@ class TestPartitionToTicks:
         assert df["trade_id"].tolist() == [30, 10, 20]
         assert df["source_row"].tolist() == [2, 3, 4]
 
+    @pytest.mark.parametrize(
+        ("session", "time_raw", "expected"),
+        [
+            # Traded on Friday afternoon for Monday's session (real B3 case).
+            ("2026-07-03", "171113202", "2026-06-30 17:11:13.202"),
+            # Batch published at 02:29 for the previous session.
+            ("2026-06-29", "022938142", "2026-06-30 02:29:38.142"),
+        ],
+    )
+    def test_timestamp_uses_calendar_date_not_session(
+        self, patched_paths, sample_zip_trade_date, session, time_raw, expected
+    ):
+        lines = [tick_line(), tick_line(trade_date=session, time_raw=time_raw)]
+        write_tick_zip(patched_paths, FeedType.DERIV, sample_zip_trade_date, lines)
+        _extractor.extract_to_raw_parquet(trade_date=sample_zip_trade_date, feed=FeedType.DERIV)
+
+        _partitioner.partition_to_ticks(
+            trade_date=sample_zip_trade_date, feed=FeedType.DERIV, upload_to_s3=False,
+        )
+
+        df = pd.read_parquet(patched_paths["deriv_ticks"] / f"{sample_zip_trade_date}.parquet")
+        assert df["trade_date"].iloc[1] == session
+        assert df["timestamp"].iloc[1] == pd.Timestamp(expected, tz="America/Sao_Paulo")
+
     @pytest.mark.parametrize("bad_time", ["", "25000000", "250000000", "106000000", "1000000O6", "1000000060"])
     def test_unreadable_time_is_kept_and_counted(
         self, patched_paths, sample_zip_trade_date, bad_time

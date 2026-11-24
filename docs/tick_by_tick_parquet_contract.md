@@ -33,9 +33,9 @@ In this order, with these Arrow types:
 |---|---|---|---|---|
 | `source_row` | `int32` | no | — | Physical line number in the TXT. The header is line 1, so the first trade is line 2. |
 | `symbol` | `string` | no | `CodigoInstrumento` | Instrument code. |
-| `trade_date` | `string` | no | `DataNegocio` | Trading session date, `YYYY-MM-DD`. |
-| `reference_date` | `string` | no | `DataReferencia` | Reference date of the record, `YYYY-MM-DD`. |
-| `timestamp` | `timestamp[ms, tz=America/Sao_Paulo]` | **yes** | `DataNegocio` + `HoraFechamento` | Trade time. Null when `time_raw` is not a valid time. |
+| `trade_date` | `string` | no | `DataNegocio` | Session the trade belongs to, `YYYY-MM-DD`. Can differ from the file's date: see [Session date and calendar date](#session-date-and-calendar-date). |
+| `reference_date` | `string` | no | `DataReferencia` | Calendar day the trade happened, `YYYY-MM-DD`. Always the file's date. |
+| `timestamp` | `timestamp[ms, tz=America/Sao_Paulo]` | **yes** | `DataReferencia` + `HoraFechamento` | Trade time. Null when `time_raw` is not a valid time. |
 | `time_raw` | `string` | no | `HoraFechamento` | The time exactly as written in the TXT (`HHMMSSmmm`, e.g. `"090005990"`). |
 | `price` | `float64` | no | `PrecoNegocio` | Trade price (the TXT's decimal comma becomes a point). |
 | `quantity` | `uint32` | no | `QuantidadeNegociada` | Quantity traded. |
@@ -58,7 +58,8 @@ Notes:
 
 ## Time zone
 
-B3 publishes `HoraFechamento` in local time, UTC-3 (glossary v3). `timestamp` is
+B3 publishes `HoraFechamento` in local time, UTC-3 (glossary v3). `timestamp`
+combines it with `reference_date`, the calendar day, never with `trade_date`. It is
 localised to `America/Sao_Paulo` and stored as UTC with that time zone in the Arrow
 type, so readers get a time-zone-aware column without guessing. Brazil has had no
 daylight saving time since 2019, so today the two are the same offset.
@@ -67,6 +68,36 @@ daylight saving time since 2019, so today the two are the same offset.
 `time_raw` is not exactly nine digits forming a valid `HH:MM:SS.mmm` time. In that
 case the row is kept, `time_raw` shows the original value, and the row is counted in
 `timestamp_null_count`.
+
+## Session date and calendar date
+
+Each file covers one **calendar day**, the file's date, and every row has
+`reference_date` equal to it. `trade_date` is the **session** the trade counts for,
+and for a few derivatives it is not the same day. These are B3 rules, measured here on
+the DERIV files of 13, 19 and 23 November 2026:
+
+| Case | When | `trade_date` | Products seen | Rows per day |
+|---|---|---|---|---|
+| Late-afternoon trading | about 16:20–18:00 | **next** session, skipping weekends and holidays (Fri 13/11 → Mon 16/11; Thu 19/11 → Mon 23/11, after the 20/11 holiday) | Agricultural and related: CCM, BGI, ICF, ETH, FRP, SJC | about 140–360 |
+| Early-morning batch | about 02:29 | **previous** session (19/11 file → 18/11) | Many: DI1, DII, DOL, WDO, WIN, CCM… | 318 on 19/11 |
+
+The RV files showed no such rows: there `trade_date` always equals `reference_date`,
+including after-hours trades (`session_type = 6`).
+
+What the contract does about it:
+
+- `timestamp` is built from `reference_date`, so it is the real time of the trade.
+  Built from `trade_date`, a Friday-afternoon trade would land on Monday afternoon.
+- `trade_date` is kept as B3 sends it, so the session of each trade is never lost.
+- The collector fails the date if any row's `reference_date` differs from the file's
+  date, because the timestamp rule above would then be wrong without any visible sign.
+
+What it means for consumers: **the trades of one DERIV session can be spread over three
+files**: the previous file (late-afternoon trades), the session's own file, and the
+next file (early-morning batch). To get every trade of session *D*, read the files of
+*D*, the previous trading day and the next trading day, and keep the rows with
+`trade_date == D`. Consumers that ignore the affected products can read just the
+session's own file and drop the rows where `trade_date != reference_date`.
 
 ## Row order
 
@@ -85,7 +116,7 @@ From the B3 glossary *Glossario_NegociosListados*, version 3 (May 2023):
 | | `2` | Deleted (cancelled) trade |
 | `session_type` | `1` | Regular session |
 | | `6` | After hours |
-| `channel_type` | — | **Not described in glossary v3.** Values seen in sample files: `2` (RV) and `1` (DERIV). |
+| `channel_type` | — | **Not described in glossary v3.** In every file checked it identifies the feed: always `1` in DERIV and `2` in RV. |
 
 The collector does not reject values outside these lists. A new code from B3 is
 published as is, and consumers decide how to treat it.
@@ -130,7 +161,8 @@ A date is **not published** when its TXT has any of these problems:
 - a header that is not exactly the 12 expected columns, in order;
 - a line that does not have exactly 12 fields;
 - more than one TXT for the date inside the ZIP;
-- a date that is not a valid `YYYY-MM-DD`;
+- a `reference_date` different from the file's date;
+- a `trade_date` that is not a valid `YYYY-MM-DD`;
 - a price, quantity, trade number, `update_action`, `session_type` or `channel_type`
   that cannot be converted to its type;
 - a row count different from the TXT's data line count.
