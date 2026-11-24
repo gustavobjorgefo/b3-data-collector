@@ -11,6 +11,7 @@ convention tied to the file name "conftest.py".
 from __future__ import annotations
 
 import shutil
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -134,3 +135,52 @@ def place_sample_zip(patched_paths, feed, fixture_name: str, trade_date: date) -
     destination = patched_paths[cfg.paths_key_downloads] / expected_filename
     shutil.copy(FIXTURES_DIR / fixture_name, destination)
     return destination
+
+TICK_TXT_HEADER = (
+    "DataReferencia;CodigoInstrumento;AcaoAtualizacao;PrecoNegocio;QuantidadeNegociada;"
+    "HoraFechamento;CodigoIdentificadorNegocio;TipoSessaoPregao;DataNegocio;"
+    "CodigoParticipanteComprador;CodigoParticipanteVendedor;TipoDoCanal"
+)
+
+
+def tick_line(
+    time_raw: str = "100000006",
+    quantity: str = "1",
+    update_action: str = "0",
+    trade_date: str = "2026-06-30",
+    buyer: str = "90",
+    seller: str = "3",
+    trade_id: str = "10",
+    price: str = "55,100",
+) -> str:
+    """One well-formed TXT data line; override a field to break it."""
+    return (
+        f"2026-06-30;BAIQ39;{update_action};{price};{quantity};{time_raw};{trade_id};1;"
+        f"{trade_date};{buyer};{seller};2"
+    )
+
+
+def write_tick_zip(
+    patched_paths,
+    feed,
+    trade_date: date,
+    lines: list[str],
+    header: str = TICK_TXT_HEADER,
+    extra_txt_names: tuple[str, ...] = (),
+) -> Path:
+    """
+    Write a ZIP with a hand-made TXT where the extractor expects it.
+
+    Real-format coverage comes from the fixture ZIPs; this helper exists
+    for the malformed inputs those files do not contain.
+    """
+    cfg = feed.config
+    zip_path = patched_paths[cfg.paths_key_downloads] / cfg.zip_name_template.format(
+        date=trade_date
+    )
+    txt_name = f"{cfg.txt_prefix_template.format(date=trade_date)}.txt"
+    content = "\n".join([header, *lines]) + "\n"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for name in (txt_name, *extra_txt_names):
+            archive.writestr(name, content.encode("latin1"))
+    return zip_path

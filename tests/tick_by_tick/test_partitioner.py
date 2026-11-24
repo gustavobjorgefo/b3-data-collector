@@ -16,17 +16,26 @@ used in ``test_downloader.py``. The pure local-partitioning tests pass
 from __future__ import annotations
 
 import io
+import json
 
 import boto3
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 from moto import mock_aws
 
+from b3_data_collector import __version__
 from b3_data_collector.common import StageStatus
 from b3_data_collector.config import Settings
 from b3_data_collector.tick_by_tick import _extractor, _partitioner
+from b3_data_collector.tick_by_tick._contract import (
+    METADATA_KEY,
+    OUTPUT_SCHEMA,
+    SCHEMA_VERSION,
+    ContractViolationError,
+)
 from b3_data_collector.tick_by_tick._feed import FeedType
-from tests.conftest import place_sample_zip
+from tests.conftest import place_sample_zip, tick_line, write_tick_zip
 
 
 @pytest.fixture
@@ -63,10 +72,10 @@ class TestPartitionToTicks:
         assert output_file.exists()
 
         df = pd.read_parquet(output_file)
-        assert "timestamp" in df.columns
-        assert pd.api.types.is_datetime64_any_dtype(df["timestamp"])
+        assert str(df["timestamp"].dt.tz) == "America/Sao_Paulo"
         # No unparseable timestamps expected from real, well-formed data
         assert df["timestamp"].isna().sum() == 0
+        assert df["timestamp"].iloc[0] == pd.Timestamp("2026-06-30 13:00:00.006", tz="UTC")
 
     def test_successful_partition_removes_raw_parquet(
         self, rv_raw_parquet, sample_zip_trade_date
@@ -88,9 +97,89 @@ class TestPartitionToTicks:
         )
 
         output_file = rv_raw_parquet["rv_ticks"] / f"{sample_zip_trade_date}.parquet"
-        df = pd.read_parquet(output_file)
+        # Types and nullability, not just names: the schema is the contract.
+        assert pq.read_schema(output_file).remove_metadata().equals(OUTPUT_SCHEMA)
 
-        assert list(df.columns) == list(_partitioner._OUTPUT_COLUMNS)
+    def test_records_full_provenance(self, rv_raw_parquet, sample_zip_trade_date):
+        _partitioner.partition_to_ticks(
+            trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
+        )
+
+        output_file = rv_raw_parquet["rv_ticks"] / f"{sample_zip_trade_date}.parquet"
+        provenance = json.loads(pq.read_schema(output_file).metadata[METADATA_KEY])
+        assert provenance["schema_version"] == SCHEMA_VERSION
+        assert provenance["feed"] == "RV"
+        assert provenance["trade_date"] == "2026-06-30"
+        assert provenance["row_count"] == provenance["source_txt_row_count"] == 20
+        assert provenance["timestamp_null_count"] == 0
+        assert provenance["timezone"] == "America/Sao_Paulo"
+        assert provenance["collector_version"] == __version__
+        assert len(provenance["source_zip_sha256"]) == 64
+        assert {"collector_commit", "created_at_utc", "source_zip_name", "source_txt_name"} <= (
+            provenance.keys()
+        )
+
+    def test_rows_keep_txt_order(self, patched_paths, sample_zip_trade_date):
+        # Same millisecond, out of trade_id order: the TXT order must win.
+        lines = [tick_line(trade_id="30"), tick_line(trade_id="10"), tick_line(trade_id="20")]
+        write_tick_zip(patched_paths, FeedType.RV, sample_zip_trade_date, lines)
+        _extractor.extract_to_raw_parquet(trade_date=sample_zip_trade_date, feed=FeedType.RV)
+
+        _partitioner.partition_to_ticks(
+            trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
+        )
+
+        df = pd.read_parquet(patched_paths["rv_ticks"] / f"{sample_zip_trade_date}.parquet")
+        assert df["trade_id"].tolist() == [30, 10, 20]
+        assert df["source_row"].tolist() == [2, 3, 4]
+
+    @pytest.mark.parametrize("bad_time", ["", "25000000", "250000000", "106000000", "1000000O6", "1000000060"])
+    def test_unreadable_time_is_kept_and_counted(
+        self, patched_paths, sample_zip_trade_date, bad_time
+    ):
+        lines = [tick_line(), tick_line(time_raw=bad_time)]
+        write_tick_zip(patched_paths, FeedType.RV, sample_zip_trade_date, lines)
+        _extractor.extract_to_raw_parquet(trade_date=sample_zip_trade_date, feed=FeedType.RV)
+
+        status, _, tick_count = _partitioner.partition_to_ticks(
+            trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
+        )
+
+        assert status is StageStatus.SUCCESS
+        assert tick_count == 2
+        output_file = patched_paths["rv_ticks"] / f"{sample_zip_trade_date}.parquet"
+        df = pd.read_parquet(output_file)
+        assert df["timestamp"].isna().tolist() == [False, True]
+        assert df["time_raw"].iloc[1] == bad_time
+        provenance = json.loads(pq.read_schema(output_file).metadata[METADATA_KEY])
+        assert provenance["timestamp_null_count"] == 1
+
+    def test_raw_without_provenance_fails(self, patched_paths, sample_zip_trade_date):
+        # A raw Parquet left behind by a collector older than the contract.
+        raw_file = patched_paths["rv_raw_parquet"] / f"{sample_zip_trade_date}.parquet"
+        pd.DataFrame({"symbol": ["BAIQ39"]}).to_parquet(raw_file, index=False)
+
+        with pytest.raises(ContractViolationError, match="overwrite=True"):
+            _partitioner.partition_to_ticks(
+                trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
+            )
+
+    def test_row_count_mismatch_fails(self, rv_raw_parquet, sample_zip_trade_date):
+        raw_file = rv_raw_parquet["rv_raw_parquet"] / f"{sample_zip_trade_date}.parquet"
+        table = pq.read_table(raw_file)
+        provenance = json.loads(table.schema.metadata[METADATA_KEY])
+        provenance["source_txt_row_count"] = 21
+        pq.write_table(
+            table.replace_schema_metadata(
+                {**table.schema.metadata, METADATA_KEY: json.dumps(provenance).encode()}
+            ),
+            raw_file,
+        )
+
+        with pytest.raises(ContractViolationError, match="has 20 rows"):
+            _partitioner.partition_to_ticks(
+                trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
+            )
 
     def test_skips_when_output_exists_and_overwrite_false(
         self, rv_raw_parquet, sample_zip_trade_date
@@ -118,20 +207,12 @@ class TestPartitionToTicks:
                 trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
             )
 
-    def test_empty_dataframe_raises_value_error(
-        self, patched_paths, sample_zip_trade_date, monkeypatch
-    ):
-        # Write a raw parquet with the right columns but zero rows, to
-        # trigger _validate_output's empty-dataframe check directly.
-        raw_file = patched_paths["rv_raw_parquet"] / f"{sample_zip_trade_date}.parquet"
-        empty_df = pd.DataFrame(columns=[
-            "trade_date", "symbol", "price", "quantity", "time",
-            "buyer_broker", "seller_broker", "session_type",
-            "update_action", "trade_id", "reference_date", "channel_type",
-        ])
-        empty_df.to_parquet(raw_file, index=False)
+    def test_empty_dataframe_raises_value_error(self, patched_paths, sample_zip_trade_date):
+        # A TXT with only the header: valid layout, zero trades.
+        write_tick_zip(patched_paths, FeedType.RV, sample_zip_trade_date, [])
+        _extractor.extract_to_raw_parquet(trade_date=sample_zip_trade_date, feed=FeedType.RV)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="zero rows"):
             _partitioner.partition_to_ticks(
                 trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
             )

@@ -87,6 +87,8 @@ B3 distribution ZIP  ->  download  ->  extract  ->  partition  ->  upload ticks
                                           local only)                  by year)
 ```
 
+**Tick-by-tick — Parquet contract.** The ticks Parquet in S3 follows a versioned contract, shared by both feeds: column order and types, a `timestamp` in `America/Sao_Paulo`, the raw B3 time kept in `time_raw`, rows in TXT order, and provenance in the Parquet footer (ZIP SHA-256, TXT row count, schema version, collector version and commit). A date whose TXT breaks the contract fails instead of being published. See [`docs/tick_by_tick_parquet_contract.md`](docs/tick_by_tick_parquet_contract.md).
+
 **Local retention.** After each daily run, `tick_by_tick/_retention.py` deletes local ZIP and ticks files older than 28 days (`LOCAL_RETENTION_DAYS` in `run_daily.py`), but only once each file is confirmed in S3 — anything that failed to upload stays on disk for a later retry. Files whose names don't match the pipeline's own naming are never touched.
 
 **Read access.** The `reader` subpackage is the inverse of collection — it never talks to B3 directly, only to S3:

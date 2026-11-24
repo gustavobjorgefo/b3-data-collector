@@ -11,10 +11,12 @@ supporting both the equities (RV) and derivatives (DERIV) feeds via the
                           skip a date whose ZIP and ticks are both in S3.
     Stage 1 — Download  : fetches the raw ZIP from B3's distribution endpoint
                           and uploads it to S3 as an immutable archive.
-    Stage 2 — Extract   : parses the ZIP, normalises types, renames columns
-                          to canonical English schema, saves daily Parquet.
-    Stage 3 — Partition : constructs the timestamp column, selects output
-                          columns, validates and saves the tick-level Parquet.
+    Stage 2 — Extract   : checks the TXT against the tick contract, converts
+                          every column explicitly, records the provenance
+                          (ZIP SHA-256, TXT row count), saves daily Parquet.
+    Stage 3 — Partition : builds the time-zone-aware timestamp, shapes the
+                          output to the contract, checks the row count and
+                          saves the tick-level Parquet with its provenance.
     Stage 4 — Ticks S3  : uploads the tick-level Parquet to S3, Hive-partitioned
                           by year (folded into Stage 3's ``partition_to_ticks``).
 

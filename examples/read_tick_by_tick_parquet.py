@@ -69,8 +69,8 @@ def main() -> None:
 
         # --- Stage 2: Partition (raw Parquet -> tick-level Parquet) ---
         print("Partitioning to tick-level Parquet ...")
-        partition_status, tick_count = _partitioner.partition_to_ticks(
-            trade_date=_SAMPLE_TRADE_DATE, feed=feed
+        partition_status, _, tick_count = _partitioner.partition_to_ticks(
+            trade_date=_SAMPLE_TRADE_DATE, feed=feed, upload_to_s3=False
         )
         print(f"  partition status: {partition_status.name}, ticks: {tick_count}")
 
