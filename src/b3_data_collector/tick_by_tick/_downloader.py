@@ -30,7 +30,7 @@ import requests
 from ..common import StageStatus, upload_file_to_s3
 from ..config import settings
 from ..paths import PATHS_B3
-from ._feed import FeedType
+from ._feed import FeedConfig, FeedType
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,27 @@ logger = logging.getLogger(__name__)
 
 _VALID_CONTENT_TYPES : Final[tuple[str, ...]] = ("zip", "octet-stream")
 _CHUNK_SIZE          : Final[int]             = 8_192
+
+
+# --- Internal helpers ---
+
+def _build_s3_key_zip(cfg: FeedConfig, trade_date: date) -> str:
+    """
+    Build the S3 key of the archived daily ZIP.
+
+    Parameters
+    ----------
+    cfg : FeedConfig
+        Feed configuration, from ``FeedType.config``.
+    trade_date : date
+        Trading date the ZIP refers to.
+
+    Returns
+    -------
+    str
+        Full S3 key, e.g. ``"b3/bdi/tick_by_tick_rv/20260626_NEGOCIOSAVISTA.zip"``.
+    """
+    return cfg.s3_prefix + cfg.zip_name_template.format(date=trade_date)
 
 
 # --- Public API ---
@@ -90,7 +111,7 @@ def download_zip(
             s3_status = upload_file_to_s3(
                 local_path = save_path,
                 bucket     = settings.AWS_S3_BUCKET_B3,
-                key        = cfg.s3_prefix + save_path.name,
+                key        = _build_s3_key_zip(cfg, trade_date),
             )
         return save_path, StageStatus.SKIPPED, s3_status
 
@@ -139,7 +160,7 @@ def download_zip(
         s3_status = upload_file_to_s3(
             local_path = save_path,
             bucket     = settings.AWS_S3_BUCKET_B3,
-            key        = cfg.s3_prefix + save_path.name,
+            key        = _build_s3_key_zip(cfg, trade_date),
         )
 
     return save_path, StageStatus.SUCCESS, s3_status

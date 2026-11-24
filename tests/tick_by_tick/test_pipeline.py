@@ -8,6 +8,7 @@ from datetime import date
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from b3_data_collector.common import StageStatus
@@ -188,6 +189,8 @@ class TestS3FailureHandling:
         monkeypatch.setattr(
             pipeline, "settings", Settings(AWS_S3_BUCKET_B3="test-bucket")
         )
+        # Stage 0 would otherwise reach the real S3.
+        monkeypatch.setattr(pipeline, "_is_archived_in_s3", lambda *_args: False)
 
         def _stub(
             zip_s3=StageStatus.SUCCESS,
@@ -284,3 +287,103 @@ class TestBucketGuard:
         result = run_pipeline(dates=date(2026, 11, 17), upload_to_s3=False)
 
         assert result.total == 1
+
+
+class TestSkipArchivedDates:
+    """
+    Stage 0: a date whose ZIP and ticks are both in S3 is skipped before
+    any request to B3 — unless ``overwrite=True`` or ``upload_to_s3=False``.
+
+    B3 answers 404 in every test, so "the stages ran" shows up as exactly
+    one download request, without needing a real ZIP.
+    """
+
+    @pytest.fixture
+    def s3_bucket(self, monkeypatch):
+        fake_settings = Settings(AWS_S3_REGION="us-east-1", AWS_S3_BUCKET_B3="test-bucket")
+        for module in (_downloader, _partitioner, pipeline):
+            monkeypatch.setattr(module, "settings", fake_settings)
+        with mock_aws():
+            client = boto3.client("s3", region_name="us-east-1")
+            client.create_bucket(Bucket="test-bucket")
+            yield client
+
+    @pytest.fixture
+    def b3_404(self, requests_mock, sample_zip_trade_date):
+        for feed in FeedType:
+            url = feed.config.url_template.format(date=f"{sample_zip_trade_date:%Y-%m-%d}")
+            requests_mock.get(url, status_code=404)
+        return requests_mock
+
+    @staticmethod
+    def _archive(client, feed, trade_date, *, zip_file=True, ticks=True):
+        cfg = feed.config
+        if zip_file:
+            key = _downloader._build_s3_key_zip(cfg, trade_date)
+            client.put_object(Bucket="test-bucket", Key=key, Body=b"zip")
+        if ticks:
+            key = _partitioner._build_s3_key_ticks(cfg.s3_prefix_ticks, trade_date)
+            client.put_object(Bucket="test-bucket", Key=key, Body=b"ticks")
+
+    @pytest.mark.parametrize("feed", list(FeedType))
+    def test_archived_date_makes_no_request_to_b3(
+        self, feed, b3_404, patched_paths, s3_bucket, sample_zip_trade_date
+    ):
+        self._archive(s3_bucket, feed, sample_zip_trade_date)
+
+        result = run_pipeline(dates=sample_zip_trade_date, feed=feed)
+
+        assert b3_404.call_count == 0
+        assert result.failed == 0
+        date_result = result.results[0]
+        assert date_result.download is StageStatus.SKIPPED
+        assert date_result.partition is StageStatus.SKIPPED
+        assert not any(patched_paths[feed.config.paths_key_downloads].iterdir())
+
+    def test_missing_zip_still_runs_the_stages(
+        self, b3_404, patched_paths, s3_bucket, sample_zip_trade_date
+    ):
+        self._archive(s3_bucket, FeedType.RV, sample_zip_trade_date, zip_file=False)
+
+        run_pipeline(dates=sample_zip_trade_date, feed=FeedType.RV)
+
+        assert b3_404.call_count == 1
+
+    def test_missing_ticks_still_runs_the_stages(
+        self, b3_404, patched_paths, s3_bucket, sample_zip_trade_date
+    ):
+        self._archive(s3_bucket, FeedType.RV, sample_zip_trade_date, ticks=False)
+
+        run_pipeline(dates=sample_zip_trade_date, feed=FeedType.RV)
+
+        assert b3_404.call_count == 1
+
+    def test_overwrite_runs_even_when_archived(
+        self, b3_404, patched_paths, s3_bucket, sample_zip_trade_date
+    ):
+        self._archive(s3_bucket, FeedType.RV, sample_zip_trade_date)
+
+        run_pipeline(dates=sample_zip_trade_date, feed=FeedType.RV, overwrite=True)
+
+        assert b3_404.call_count == 1
+
+    def test_local_only_run_ignores_s3(
+        self, b3_404, patched_paths, s3_bucket, sample_zip_trade_date
+    ):
+        self._archive(s3_bucket, FeedType.RV, sample_zip_trade_date)
+
+        run_pipeline(dates=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False)
+
+        assert b3_404.call_count == 1
+
+    def test_s3_check_error_runs_the_stages(
+        self, b3_404, patched_paths, s3_bucket, sample_zip_trade_date, monkeypatch
+    ):
+        def _raise(*_args):
+            raise ClientError({"Error": {"Code": "403", "Message": "Forbidden"}}, "HeadObject")
+
+        monkeypatch.setattr(pipeline, "_is_archived_in_s3", _raise)
+
+        run_pipeline(dates=sample_zip_trade_date, feed=FeedType.RV)
+
+        assert b3_404.call_count == 1
