@@ -118,3 +118,17 @@ class TestUploadCsv:
                 overwrite=True,
             )
             assert status is StageStatus.FAILED
+
+class TestCsvExistsInS3:
+    def test_true_when_archived(self, s3_bucket, sample_trade_date, sample_csv_bytes):
+        key = _uploader._build_s3_key("renda_variavel", "DailyAverageStocks", sample_trade_date)
+        s3_bucket.put_object(Bucket="test-bucket", Key=key, Body=sample_csv_bytes)
+
+        assert _uploader.csv_exists_in_s3(
+            section="renda_variavel", api_name="DailyAverageStocks", trade_date=sample_trade_date
+        )
+
+    def test_false_when_missing(self, s3_bucket, sample_trade_date):
+        assert not _uploader.csv_exists_in_s3(
+            section="renda_variavel", api_name="DailyAverageStocks", trade_date=sample_trade_date
+        )

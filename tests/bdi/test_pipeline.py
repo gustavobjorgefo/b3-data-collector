@@ -8,9 +8,11 @@ from datetime import date
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from b3_data_collector.bdi import _uploader, pipeline
+from b3_data_collector.bdi._catalog import ENABLED_REPORTS
 from b3_data_collector.bdi._models import ReportStatus
 from b3_data_collector.bdi.pipeline import run_bdi_pipeline
 from b3_data_collector.common import (
@@ -153,6 +155,80 @@ class TestRunBdiPipelineIntegration:
 
         assert result.failed == result.total
         assert result.succeeded == 0
+
+
+class TestSkipArchivedReports:
+    """
+    Step 0 of the BDI pipeline: reports already in S3 are skipped before
+    any request to B3, unless ``overwrite=True``.
+    """
+
+    _EXPORT_URL = "https://arquivos.b3.com.br/bdi/table/export/csv?lang=pt-BR"
+
+    @pytest.fixture
+    def s3_bucket(self, monkeypatch):
+        fake_settings = Settings(AWS_S3_REGION="us-east-1", AWS_S3_BUCKET_B3="test-bucket")
+        monkeypatch.setattr(_uploader, "settings", fake_settings)
+        monkeypatch.setattr(pipeline, "settings", fake_settings)
+        with mock_aws():
+            client = boto3.client("s3", region_name="us-east-1")
+            client.create_bucket(Bucket="test-bucket")
+            yield client
+
+    @staticmethod
+    def _archive(client, reports, trade_date, content):
+        for report in reports:
+            key = _uploader._build_s3_key(report.section, report.api_name, trade_date)
+            client.put_object(Bucket="test-bucket", Key=key, Body=content)
+
+    def test_archived_date_makes_no_request_to_b3(
+        self, requests_mock, s3_bucket, sample_trade_date, sample_csv_bytes
+    ):
+        self._archive(s3_bucket, ENABLED_REPORTS, sample_trade_date, sample_csv_bytes)
+        requests_mock.post(self._EXPORT_URL, content=sample_csv_bytes)
+
+        result = run_bdi_pipeline(dates=sample_trade_date)
+
+        assert requests_mock.call_count == 0
+        assert result.failed == 0
+        assert all(r.status is ReportStatus.SKIPPED for r in result.results)
+
+    def test_fetches_only_missing_reports(
+        self, requests_mock, s3_bucket, sample_trade_date, sample_csv_bytes
+    ):
+        missing, *archived = ENABLED_REPORTS
+        self._archive(s3_bucket, archived, sample_trade_date, sample_csv_bytes)
+        requests_mock.post(self._EXPORT_URL, content=sample_csv_bytes)
+
+        result = run_bdi_pipeline(dates=sample_trade_date)
+
+        assert requests_mock.call_count == 1
+        statuses = {r.report_name: r.status for r in result.results}
+        assert statuses[missing.api_name] is ReportStatus.SUCCESS
+
+    def test_overwrite_fetches_even_when_archived(
+        self, requests_mock, s3_bucket, sample_trade_date, sample_csv_bytes
+    ):
+        self._archive(s3_bucket, ENABLED_REPORTS, sample_trade_date, sample_csv_bytes)
+        requests_mock.post(self._EXPORT_URL, content=sample_csv_bytes)
+
+        run_bdi_pipeline(dates=sample_trade_date, overwrite=True)
+
+        assert requests_mock.call_count == len(ENABLED_REPORTS)
+
+    def test_s3_check_error_falls_back_to_fetch(
+        self, requests_mock, s3_bucket, sample_trade_date, sample_csv_bytes, monkeypatch
+    ):
+        def _raise(**_kwargs):
+            raise ClientError({"Error": {"Code": "403", "Message": "Forbidden"}}, "HeadObject")
+
+        monkeypatch.setattr(pipeline, "csv_exists_in_s3", _raise)
+        requests_mock.post(self._EXPORT_URL, content=sample_csv_bytes)
+
+        result = run_bdi_pipeline(dates=sample_trade_date)
+
+        assert requests_mock.call_count == len(ENABLED_REPORTS)
+        assert result.failed == 0
 
 class TestBucketGuard:
     def test_empty_bucket_raises_before_any_request(self, requests_mock, monkeypatch):
