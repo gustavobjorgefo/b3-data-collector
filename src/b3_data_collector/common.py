@@ -156,6 +156,35 @@ def resolve_dates(
 
 # --- S3 access ---
 
+def require_s3_bucket(bucket: str) -> str:
+    """
+    Fail fast when the S3 bucket name is not configured.
+
+    Without this check an empty bucket name only surfaces deep inside
+    botocore, once per upload, as an opaque parameter-validation error.
+
+    Parameters
+    ----------
+    bucket : str
+        Bucket name, usually ``settings.AWS_S3_BUCKET_B3``.
+
+    Returns
+    -------
+    str
+        The same bucket name, unchanged.
+
+    Raises
+    ------
+    ValueError
+        If ``bucket`` is empty.
+    """
+    if not bucket:
+        raise ValueError(
+            "AWS_S3_BUCKET_B3 is not set — check the .env at the repository root."
+        )
+    return bucket
+
+
 def build_s3_client() -> boto3.client:
     """
     Build a boto3 S3 client from the module-level settings.
