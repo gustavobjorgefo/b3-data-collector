@@ -16,7 +16,8 @@ resolving the correct input/output paths and S3 prefix via
 
 The raw Parquet produced by the extraction stage is intentionally not
 uploaded to S3 — it is a disposable intermediate artifact, reproducible
-at any time from the archived ZIP. Only this stage's output (the
+at any time from the archived ZIP. It is deleted as soon as the ticks
+Parquet has been written. Only this stage's output (the
 canonical, timestamped ticks Parquet) is persisted to S3, under a
 Hive-style partition:
 
@@ -129,8 +130,8 @@ def partition_to_ticks(
 
     Constructs a combined ``timestamp`` column from ``trade_date`` and
     ``time``, selects the canonical output columns, validates the result,
-    writes to the feed-specific ticks directory, and uploads the result
-    to S3 (unless ``upload_to_s3=False``).
+    writes to the feed-specific ticks directory, deletes the now redundant
+    raw Parquet, and uploads the result to S3 (unless ``upload_to_s3=False``).
 
     Parameters
     ----------
@@ -218,6 +219,9 @@ def partition_to_ticks(
         "[%s] Partition complete for %s — %d ticks → %s",
         cfg.label, trade_date, tick_count, output_file,
     )
+
+    raw_file.unlink()
+    logger.info("[%s] Removed raw Parquet: %s", cfg.label, raw_file.name)
 
     # --- Upload to S3 ---
     if upload_to_s3:

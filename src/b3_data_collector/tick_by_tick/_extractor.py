@@ -171,10 +171,20 @@ def extract_to_raw_parquet(
     zip_name    = cfg.zip_name_template.format(date=trade_date)
     zip_path    = PATHS_B3[cfg.paths_key_downloads] / zip_name
     output_file = PATHS_B3[cfg.paths_key_raw] / f"{trade_date}.parquet"
+    ticks_file  = PATHS_B3[cfg.paths_key_ticks] / f"{trade_date}.parquet"
 
     if output_file.exists() and not overwrite:
         logger.info(
             "[%s] Skipping extraction for %s — raw Parquet exists.",
+            cfg.label, trade_date,
+        )
+        return StageStatus.SKIPPED
+
+    # The partitioner deletes the raw Parquet once the ticks file is
+    # written, so an existing ticks file means this stage already ran.
+    if ticks_file.exists() and not overwrite:
+        logger.info(
+            "[%s] Skipping extraction for %s — ticks Parquet exists.",
             cfg.label, trade_date,
         )
         return StageStatus.SKIPPED

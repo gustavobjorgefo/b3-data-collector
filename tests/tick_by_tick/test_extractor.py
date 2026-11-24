@@ -66,6 +66,23 @@ class TestExtractToRawParquetRV:
         # untouched — still the fake placeholder content
         assert output_file.read_bytes() == b"fake existing parquet"
 
+    def test_skips_when_ticks_exist_and_overwrite_false(
+        self, patched_paths, sample_zip_trade_date
+    ):
+        # The partitioner deletes the raw Parquet after writing ticks, so a
+        # re-run must not rebuild it just because it is missing.
+        place_sample_zip(patched_paths, FeedType.RV, "sample_rv.zip", sample_zip_trade_date)
+        ticks_file = patched_paths["rv_ticks"] / f"{sample_zip_trade_date}.parquet"
+        ticks_file.write_bytes(b"fake existing ticks")
+
+        status = _extractor.extract_to_raw_parquet(
+            trade_date=sample_zip_trade_date, feed=FeedType.RV, overwrite=False
+        )
+
+        assert status is StageStatus.SKIPPED
+        raw_file = patched_paths["rv_raw_parquet"] / f"{sample_zip_trade_date}.parquet"
+        assert not raw_file.exists()
+
     def test_missing_zip_raises_file_not_found(self, patched_paths, sample_zip_trade_date):
         with pytest.raises(FileNotFoundError):
             _extractor.extract_to_raw_parquet(

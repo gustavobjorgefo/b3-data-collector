@@ -63,7 +63,7 @@ b3-data-collector/
 ├── examples/                 Runnable examples using real (trimmed) sample data
 ├── scripts/                  One-off developer tooling (test fixture builder)
 ├── docs/                     Simplified BDI report catalog reference
-├── data/                     Local working directory (gitignored)
+├── data/                     Local working directory, last ~4 weeks only (gitignored)
 └── logs/                     Local log output (gitignored)
 ```
 
@@ -78,7 +78,7 @@ B3 BDI export API  ->  fetch_report_csv()  ->  upload_csv()  ->  S3
                         (bdi/_client.py)       (bdi/_uploader.py)
 ```
 
-**Tick-by-tick — collection.** A four-stage pipeline per feed (RV / DERIV). The raw ZIP is archived immutably as-is; the raw intermediate Parquet is disposable (reproducible from the ZIP at any time) and never leaves local disk; only the final, canonical ticks Parquet is archived to S3, alongside the ZIP:
+**Tick-by-tick — collection.** A four-stage pipeline per feed (RV / DERIV). The raw ZIP is archived immutably as-is; the raw intermediate Parquet is disposable (reproducible from the ZIP at any time), never leaves local disk and is deleted as soon as the ticks Parquet is written; only the final, canonical ticks Parquet is archived to S3, alongside the ZIP:
 
 ```text
 B3 distribution ZIP  ->  download  ->  extract  ->  partition  ->  upload ticks
@@ -86,6 +86,8 @@ B3 distribution ZIP  ->  download  ->  extract  ->  partition  ->  upload ticks
                            to S3)         Parquet,       Parquet)      (Hive-partitioned
                                           local only)                  by year)
 ```
+
+**Local retention.** After each daily run, `tick_by_tick/_retention.py` deletes local ZIP and ticks files older than 28 days (`LOCAL_RETENTION_DAYS` in `run_daily.py`), but only once each file is confirmed in S3 — anything that failed to upload stays on disk for a later retry. Files whose names don't match the pipeline's own naming are never touched.
 
 **Read access.** The `reader` subpackage is the inverse of collection — it never talks to B3 directly, only to S3:
 
