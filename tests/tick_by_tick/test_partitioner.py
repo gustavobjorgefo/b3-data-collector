@@ -68,6 +68,18 @@ class TestPartitionToTicks:
         # No unparseable timestamps expected from real, well-formed data
         assert df["timestamp"].isna().sum() == 0
 
+    def test_successful_partition_removes_raw_parquet(
+        self, rv_raw_parquet, sample_zip_trade_date
+    ):
+        raw_file = rv_raw_parquet["rv_raw_parquet"] / f"{sample_zip_trade_date}.parquet"
+        assert raw_file.exists()
+
+        _partitioner.partition_to_ticks(
+            trade_date=sample_zip_trade_date, feed=FeedType.RV, upload_to_s3=False,
+        )
+
+        assert not raw_file.exists()
+
     def test_output_columns_match_canonical_schema(
         self, rv_raw_parquet, sample_zip_trade_date
     ):

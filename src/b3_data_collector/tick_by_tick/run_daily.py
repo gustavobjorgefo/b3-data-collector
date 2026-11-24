@@ -21,12 +21,14 @@ if str(_SRC_DIR) not in sys.path:
 from b3_data_collector.common import today_b3
 from b3_data_collector.paths import LOGS_DIR
 from b3_data_collector.tick_by_tick._feed import FeedType
+from b3_data_collector.tick_by_tick._retention import prune_local_files
 from b3_data_collector.tick_by_tick.pipeline import run_pipeline
 
 # --- Configuration ---
 
-UPLOAD_TO_S3 : Final[bool] = True
-OVERWRITE    : Final[bool] = False
+UPLOAD_TO_S3         : Final[bool] = True
+OVERWRITE            : Final[bool] = False
+LOCAL_RETENTION_DAYS : Final[int]  = 28  # ~4 weeks: time to retry failed uploads locally
 
 
 # --- Logging setup ---
@@ -85,6 +87,11 @@ def main() -> None:
         upload_to_s3 = UPLOAD_TO_S3,
         overwrite    = OVERWRITE,
     )
+
+    # Runs before the exit code is decided but never changes it: retention
+    # is housekeeping, and upload failures are already reported above.
+    for feed in FeedType:
+        prune_local_files(feed, retention_days=LOCAL_RETENTION_DAYS)
 
     # Both summaries are already logged inside run_pipeline() (via
     # PipelineResult.summary). Exit non-zero if any feed had failures —
