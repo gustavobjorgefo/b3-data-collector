@@ -4,9 +4,9 @@
 S3 uploader for BDI report CSVs.
 
 Builds the Hive-style partitioned S3 key for a given report and trading
-date, and delegates the actual upload to the shared helpers in
-``common.py``. Key structure is BDI-specific and therefore lives here,
-not in ``common.py``.
+date, checks whether that key is already archived, and delegates the
+actual upload to the shared helpers in ``common.py``. Key structure is
+BDI-specific and therefore lives here, not in ``common.py``.
 
 Key format
 ----------
@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Final
 
-from ..common import StageStatus, upload_bytes_to_s3
+from ..common import StageStatus, build_s3_client, s3_object_exists, upload_bytes_to_s3
 from ..config import settings
 
 # --- Module constants ---
@@ -40,6 +40,38 @@ def _build_s3_key(section: str, api_name: str, trade_date: date) -> str:
 
 
 # --- Public API ---
+
+def csv_exists_in_s3(section: str, api_name: str, trade_date: date) -> bool:
+    """
+    Check whether a BDI report CSV is already archived in S3.
+
+    Parameters
+    ----------
+    section : str
+        Top-level report section (e.g. ``"renda_variavel"``).
+    api_name : str
+        BDI API name of the report (e.g. ``"DailyAverageStocks"``).
+    trade_date : date
+        Trading date the report refers to.
+
+    Returns
+    -------
+    bool
+        ``True`` if the object exists, ``False`` if S3 returns a 404.
+
+    Raises
+    ------
+    botocore.exceptions.BotoCoreError
+        For client-side or connection errors.
+    botocore.exceptions.ClientError
+        For any S3 error response other than a 404 (e.g. access denied).
+    """
+    return s3_object_exists(
+        client = build_s3_client(),
+        bucket = settings.AWS_S3_BUCKET_B3,
+        key    = _build_s3_key(section, api_name, trade_date),
+    )
+
 
 def upload_csv(
     content    : bytes,

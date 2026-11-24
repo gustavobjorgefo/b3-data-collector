@@ -3,8 +3,10 @@
 """
 BDI reports ingestion pipeline.
 
-Orchestrates the two-step process for every enabled report in the catalog:
+Orchestrates the process for every enabled report in the catalog:
 
+    Step 0 — Check  : unless ``overwrite=True``, skip reports already in S3
+                      without contacting B3.
     Step 1 — Fetch  : POST to the BDI export endpoint; receive CSV bytes.
     Step 2 — Upload : stream bytes directly to S3 (no local file written).
 
@@ -30,13 +32,14 @@ import time
 from datetime import date
 
 import requests
+from botocore.exceptions import BotoCoreError, ClientError
 
 from ..common import StageStatus, require_s3_bucket, resolve_dates
 from ..config import settings
 from ._catalog import ENABLED_REPORTS
 from ._client import fetch_report_csv
 from ._models import BdiPipelineResult, ReportResult, ReportStatus
-from ._uploader import upload_csv
+from ._uploader import csv_exists_in_s3, upload_csv
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,25 @@ def _run_single_report(
     ReportResult
     """
     result = ReportResult(report_name=api_name, trade_date=trade_date)
+
+    # --- Step 0: Skip reports already archived ---
+    # A HEAD request to S3 is far cheaper than a BDI export, which can take
+    # tens of seconds and time out; re-runs over archived dates stay fast.
+    if not overwrite:
+        try:
+            if csv_exists_in_s3(section=section, api_name=api_name, trade_date=trade_date):
+                logger.info(
+                    "Already in S3, skipping fetch: '%s' for %s", api_name, trade_date
+                )
+                result.status = ReportStatus.SKIPPED
+                return result
+        except (BotoCoreError, ClientError) as exc:
+            # Not fatal: fetching anyway is still correct, and a real S3
+            # problem will surface as a failed upload in Step 2.
+            logger.warning(
+                "S3 check failed for '%s' on %s, fetching anyway: %s",
+                api_name, trade_date, exc,
+            )
 
     # --- Step 1: Fetch CSV from BDI API ---
     try:
