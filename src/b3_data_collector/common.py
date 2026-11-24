@@ -361,3 +361,32 @@ def download_bytes_from_s3(bucket: str, key: str) -> bytes:
         raise
 
     return response["Body"].read()
+
+def download_file_from_s3(bucket: str, key: str, local_path: Path) -> None:
+    """
+    Download an S3 object to a local file, streaming it to disk.
+
+    Parameters
+    ----------
+    bucket : str
+        Source bucket name.
+    key : str
+        Object key to download.
+    local_path : Path
+        Destination file. Parent directories are created; an existing
+        file is replaced.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``key`` does not exist in ``bucket``.
+    botocore.exceptions.ClientError
+        For any other S3 error (e.g. access denied).
+    """
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        build_s3_client().download_file(Bucket=bucket, Key=key, Filename=str(local_path))
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] in ("404", "NoSuchKey"):
+            raise FileNotFoundError(f"S3 object not found: s3://{bucket}/{key}") from exc
+        raise

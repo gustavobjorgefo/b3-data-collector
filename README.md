@@ -162,6 +162,18 @@ run_pipeline(dates=("2026-06-01", "2026-06-30"), feed=FeedType.RV)
 
 Or schedule the daily entrypoints (`bdi/run_daily.py`, `tick_by_tick/run_daily.py`) via cron or Windows Task Scheduler — see the docstrings in each file for exact scheduling recommendations.
 
+### Rebuilding the ticks Parquet from the archive
+
+`run_pipeline` downloads from B3, which only keeps the last 20 trading days. To rewrite older ticks files — for example after a change to the [Parquet contract](docs/tick_by_tick_parquet_contract.md) — rebuild them from the ZIPs archived in S3:
+
+```bash
+python -m b3_data_collector.tick_by_tick.backfill --dry-run        # what would run
+python -m b3_data_collector.tick_by_tick.backfill                  # both feeds, every archived date
+python -m b3_data_collector.tick_by_tick.backfill --verify-only    # check S3 against the contract
+```
+
+It processes one date at a time, deletes the local files as it goes, writes a CSV report to `logs/`, skips dates already written by the same commit (so an interrupted run can just be restarted), and ends by checking the footer of every ticks Parquet in S3. Don't run it at the same time as the daily pipeline.
+
 ### Reading already-collected data
 
 ```python
