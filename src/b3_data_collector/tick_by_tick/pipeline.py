@@ -35,7 +35,8 @@ import logging
 import time
 from datetime import date
 
-from ..common import StageStatus, resolve_dates
+from ..common import StageStatus, require_s3_bucket, resolve_dates
+from ..config import settings
 from ._downloader import download_zip
 from ._extractor import extract_to_raw_parquet
 from ._feed import FeedType
@@ -46,6 +47,23 @@ logger = logging.getLogger(__name__)
 
 
 # --- Internal helpers ---
+
+def _append_error(result: DateResult, message: str) -> None:
+    """
+    Add ``message`` to ``result.error`` without discarding earlier errors.
+
+    A failed ZIP upload does not stop the later stages, so a single date
+    can collect more than one error before the run ends.
+
+    Parameters
+    ----------
+    result : DateResult
+        Result being built for the current date.
+    message : str
+        Human-readable description of the failure.
+    """
+    result.error = message if result.error is None else f"{result.error}; {message}"
+
 
 def _run_single_date(
     trade_date   : date,
@@ -95,12 +113,17 @@ def _run_single_date(
             result.download  = dl_status
             result.s3_upload = s3_status
 
+            # Not fatal: later stages run locally, and the ZIP stays on disk
+            # so a later run can upload it again.
+            if s3_status is StageStatus.FAILED:
+                _append_error(result, "S3 upload failed: ZIP archive")
+
             if dl_status is StageStatus.UNAVAILABLE:
-                result.error = f"No data available on B3 for {trade_date}."
+                _append_error(result, f"No data available on B3 for {trade_date}.")
                 return result
 
             if dl_status is StageStatus.FAILED:
-                result.error = f"Download failed for {trade_date}."
+                _append_error(result, f"Download failed for {trade_date}.")
                 return result
 
         except Exception as exc:
@@ -109,7 +132,7 @@ def _run_single_date(
                 trade_date, feed.config.label,
             )
             result.download = StageStatus.FAILED
-            result.error    = f"Download exception: {exc}"
+            _append_error(result, f"Download exception: {exc}")
             return result
 
     # --- Stage 2: Extract ---
@@ -123,12 +146,12 @@ def _run_single_date(
         except FileNotFoundError as exc:
             logger.error("Extract FileNotFoundError for %s: %s", trade_date, exc)
             result.extract = StageStatus.FAILED
-            result.error   = str(exc)
+            _append_error(result, str(exc))
             return result
         except (KeyError, ValueError) as exc:
             logger.error("Extract error for %s: %s", trade_date, exc)
             result.extract = StageStatus.FAILED
-            result.error   = str(exc)
+            _append_error(result, str(exc))
             return result
         except Exception as exc:
             logger.exception(
@@ -136,7 +159,7 @@ def _run_single_date(
                 trade_date, feed.config.label,
             )
             result.extract = StageStatus.FAILED
-            result.error   = f"Extract exception: {exc}"
+            _append_error(result, f"Extract exception: {exc}")
             return result
 
     # --- Stage 3 & 4: Partition + ticks S3 upload ---
@@ -151,21 +174,24 @@ def _run_single_date(
             result.partition       = partition_status
             result.ticks_s3_upload = ticks_s3_status
             result.tick_count      = tick_count
+
+            if ticks_s3_status is StageStatus.FAILED:
+                _append_error(result, "S3 upload failed: ticks Parquet")
         except FileNotFoundError as exc:
             logger.error("Partition FileNotFoundError for %s: %s", trade_date, exc)
             result.partition = StageStatus.FAILED
-            result.error     = str(exc)
+            _append_error(result, str(exc))
         except ValueError as exc:
             logger.error("Partition validation error for %s: %s", trade_date, exc)
             result.partition = StageStatus.FAILED
-            result.error     = str(exc)
+            _append_error(result, str(exc))
         except Exception as exc:
             logger.exception(
                 "Unexpected error in partition stage for %s [%s]",
                 trade_date, feed.config.label,
             )
             result.partition = StageStatus.FAILED
-            result.error     = f"Partition exception: {exc}"
+            _append_error(result, f"Partition exception: {exc}")
 
     return result
 
@@ -217,7 +243,15 @@ def run_pipeline(
     PipelineResult
         Structured result containing per-date outcomes and aggregate
         statistics. Suitable for logging and e-mail notification.
+
+    Raises
+    ------
+    ValueError
+        If ``upload_to_s3`` is ``True`` and ``AWS_S3_BUCKET_B3`` is not set.
     """
+    if upload_to_s3:
+        require_s3_bucket(settings.AWS_S3_BUCKET_B3)
+
     date_list       = resolve_dates(dates)
     pipeline_result = PipelineResult(started_at=time.monotonic())
     label           = feed.config.label

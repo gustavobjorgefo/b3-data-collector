@@ -31,7 +31,8 @@ from datetime import date
 
 import requests
 
-from ..common import StageStatus, resolve_dates
+from ..common import StageStatus, require_s3_bucket, resolve_dates
+from ..config import settings
 from ._catalog import ENABLED_REPORTS
 from ._client import fetch_report_csv
 from ._models import BdiPipelineResult, ReportResult, ReportStatus
@@ -139,7 +140,14 @@ def run_bdi_pipeline(
     -------
     BdiPipelineResult
         Structured result with per-report outcomes and aggregate statistics.
+
+    Raises
+    ------
+    ValueError
+        If ``AWS_S3_BUCKET_B3`` is not set.
     """
+    require_s3_bucket(settings.AWS_S3_BUCKET_B3)
+
     date_list       = resolve_dates(dates)
     pipeline_result = BdiPipelineResult(started_at=time.monotonic())
     enabled_count   = len(ENABLED_REPORTS)

@@ -10,7 +10,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from b3_data_collector.bdi import _uploader
+from b3_data_collector.bdi import _uploader, pipeline
 from b3_data_collector.bdi._models import ReportStatus
 from b3_data_collector.bdi.pipeline import run_bdi_pipeline
 from b3_data_collector.common import (
@@ -98,6 +98,7 @@ class TestRunBdiPipelineIntegration:
     @pytest.fixture
     def s3_bucket(self, fake_settings, monkeypatch):
         monkeypatch.setattr(_uploader, "settings", fake_settings)
+        monkeypatch.setattr(pipeline, "settings", fake_settings)
         with mock_aws():
             client = boto3.client("s3", region_name=fake_settings.AWS_S3_REGION)
             client.create_bucket(Bucket=fake_settings.AWS_S3_BUCKET_B3)
@@ -152,3 +153,12 @@ class TestRunBdiPipelineIntegration:
 
         assert result.failed == result.total
         assert result.succeeded == 0
+
+class TestBucketGuard:
+    def test_empty_bucket_raises_before_any_request(self, requests_mock, monkeypatch):
+        monkeypatch.setattr(pipeline, "settings", Settings(AWS_S3_BUCKET_B3=""))
+
+        with pytest.raises(ValueError, match="AWS_S3_BUCKET_B3"):
+            run_bdi_pipeline(dates=date(2026, 11, 17))
+
+        assert requests_mock.call_count == 0

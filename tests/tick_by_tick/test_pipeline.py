@@ -21,7 +21,7 @@ from b3_data_collector.common import (
     resolve_dates as _resolve_dates,
 )
 from b3_data_collector.config import Settings
-from b3_data_collector.tick_by_tick import _downloader, _partitioner
+from b3_data_collector.tick_by_tick import _downloader, _partitioner, pipeline
 from b3_data_collector.tick_by_tick._feed import FeedType
 from b3_data_collector.tick_by_tick.pipeline import run_pipeline
 
@@ -77,11 +77,11 @@ class TestRunPipelineIntegration:
     to tmp_path. Uses the real sample ZIP fixture as the download response,
     so the full chain runs on genuine B3-format data.
 
-    ``settings`` is patched on both ``_downloader`` (ZIP archive upload)
-    and ``_partitioner`` (processed ticks Parquet upload) — each module
-    holds its own module-level reference to the settings object, so both
-    must point at the same fake bucket for the full chain to land in the
-    same mocked S3.
+    ``settings`` is patched on ``_downloader`` (ZIP archive upload),
+    ``_partitioner`` (processed ticks Parquet upload) and ``pipeline``
+    (bucket check at start) — each module holds its own module-level
+    reference to the settings object, so all must point at the same fake
+    bucket for the full chain to land in the same mocked S3.
     """
 
     @pytest.fixture
@@ -97,6 +97,7 @@ class TestRunPipelineIntegration:
     def s3_bucket(self, fake_settings, monkeypatch):
         monkeypatch.setattr(_downloader, "settings", fake_settings)
         monkeypatch.setattr(_partitioner, "settings", fake_settings)
+        monkeypatch.setattr(pipeline, "settings", fake_settings)
         with mock_aws():
             client = boto3.client("s3", region_name=fake_settings.AWS_S3_REGION)
             client.create_bucket(Bucket=fake_settings.AWS_S3_BUCKET_B3)
@@ -175,3 +176,111 @@ class TestRunPipelineIntegration:
         assert date_result.extract is StageStatus.SKIPPED
         assert date_result.partition is StageStatus.SKIPPED
         assert date_result.ticks_s3_upload is StageStatus.SKIPPED
+
+class TestS3FailureHandling:
+    """
+    ``run_pipeline`` with every stage stubbed — isolates how S3 upload
+    statuses become date-level errors, without network, disk or S3.
+    """
+
+    @pytest.fixture
+    def stub_stages(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline, "settings", Settings(AWS_S3_BUCKET_B3="test-bucket")
+        )
+
+        def _stub(
+            zip_s3=StageStatus.SUCCESS,
+            ticks_s3=StageStatus.SUCCESS,
+            extract_error=None,
+        ):
+            def _extract(**_kwargs):
+                if extract_error is not None:
+                    raise extract_error
+                return StageStatus.SUCCESS
+
+            monkeypatch.setattr(
+                pipeline, "download_zip", lambda **_kwargs: (None, StageStatus.SUCCESS, zip_s3)
+            )
+            monkeypatch.setattr(pipeline, "extract_to_raw_parquet", _extract)
+            monkeypatch.setattr(
+                pipeline,
+                "partition_to_ticks",
+                lambda **_kwargs: (StageStatus.SUCCESS, ticks_s3, 20),
+            )
+
+        return _stub
+
+    def _run_one(self):
+        result = run_pipeline(dates=date(2026, 11, 17), feed=FeedType.DERIV)
+        return result, result.results[0]
+
+    def test_all_uploads_succeed(self, stub_stages):
+        stub_stages()
+
+        result, date_result = self._run_one()
+
+        assert result.failed == 0
+        assert date_result.error is None
+
+    def test_zip_upload_failure_marks_date_failed_but_runs_later_stages(self, stub_stages):
+        stub_stages(zip_s3=StageStatus.FAILED)
+
+        result, date_result = self._run_one()
+
+        assert result.failed == 1
+        assert date_result.error == "S3 upload failed: ZIP archive"
+        assert date_result.extract is StageStatus.SUCCESS
+        assert date_result.partition is StageStatus.SUCCESS
+
+    def test_ticks_upload_failure_marks_date_failed(self, stub_stages):
+        stub_stages(ticks_s3=StageStatus.FAILED)
+
+        result, date_result = self._run_one()
+
+        assert result.failed == 1
+        assert date_result.error == "S3 upload failed: ticks Parquet"
+
+    def test_both_upload_failures_are_reported(self, stub_stages):
+        stub_stages(zip_s3=StageStatus.FAILED, ticks_s3=StageStatus.FAILED)
+
+        _, date_result = self._run_one()
+
+        assert date_result.error == (
+            "S3 upload failed: ZIP archive; S3 upload failed: ticks Parquet"
+        )
+
+    def test_later_stage_error_keeps_earlier_upload_error(self, stub_stages):
+        stub_stages(
+            zip_s3=StageStatus.FAILED,
+            extract_error=FileNotFoundError("ZIP missing"),
+        )
+
+        _, date_result = self._run_one()
+
+        assert date_result.error == "S3 upload failed: ZIP archive; ZIP missing"
+
+
+class TestBucketGuard:
+    def test_empty_bucket_raises_before_any_stage(self, monkeypatch):
+        monkeypatch.setattr(pipeline, "settings", Settings(AWS_S3_BUCKET_B3=""))
+
+        def _fail_if_called(**_kwargs):
+            raise AssertionError("download_zip must not run without a bucket")
+
+        monkeypatch.setattr(pipeline, "download_zip", _fail_if_called)
+
+        with pytest.raises(ValueError, match="AWS_S3_BUCKET_B3"):
+            run_pipeline(dates=date(2026, 11, 17), upload_to_s3=True)
+
+    def test_empty_bucket_allowed_when_upload_disabled(self, monkeypatch):
+        monkeypatch.setattr(pipeline, "settings", Settings(AWS_S3_BUCKET_B3=""))
+        monkeypatch.setattr(
+            pipeline,
+            "download_zip",
+            lambda **_kwargs: (None, StageStatus.UNAVAILABLE, StageStatus.SKIPPED),
+        )
+
+        result = run_pipeline(dates=date(2026, 11, 17), upload_to_s3=False)
+
+        assert result.total == 1
